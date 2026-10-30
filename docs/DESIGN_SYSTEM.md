@@ -5,33 +5,52 @@ implemented as CSS custom properties in `frontend/src/styles/tokens.css`, mapped
 `frontend/tailwind.config.ts`. Components consume tokens only — a hex colour inside a component is a
 review defect.
 
+**There is exactly one theme.** The product is always navy; there is no light theme and no theme
+switch anywhere in the app (`session.tsx`, `Shell.tsx`, `types.ts` carry no `theme` field, and the
+`User` payload no longer returns one). This is a deliberate brand and readability decision: every
+screen, PDF and screenshot is the same institutional surface, and no component has to be reviewed
+against two palettes. The colour families are navy, gold and the four semantic status colours — no
+other hue may be introduced.
+
 ## 1. Colour
 
 Hex values are the source of truth; each token also has an `-rgb` triple so Tailwind can apply
-opacity modifiers (`bg-surface-raised/60`) while the theme swaps underneath.
+opacity modifiers (`bg-surface-raised/60`) without losing the token.
 
-| Token | Dark (default) | Light | Use |
-| --- | --- | --- | --- |
-| `--navy` / `--navy-800` | `#16283f` | `#16283f` | brand base, sidebars |
-| `--navy-900` | `#0d1a2b` | — | deepest surface, logo plate |
-| `--navy-700` | `#223b57` | — | hover on navy |
-| `--gold` | `#c9a227` | `#c9a227` | primary action, active nav, focus ring |
-| `--gold-600` | `#a8861d` | `#a8861d` | pressed gold, gold text on light |
-| `--gold-300` | `#e3c766` | `#e3c766` | gold accents on dark |
-| `--surface` | `#0f1b2a` | `#f6f7f9` | app background |
-| `--surface-alt` | `#142436` | `#ffffff` | cards |
-| `--surface-raised` | `#1a2c41` | `#ffffff` | drawers, popovers |
-| `--line` | `#27384d` | `#dde3ea` | borders, dividers |
-| `--ink` | `#eef2f7` | `#16283f` | primary text |
-| `--ink-muted` | `#a9b7c7` | `#4c5c70` | secondary text |
-| `--ink-subtle` | `#7a8a9d` | `#6b7b8f` | timestamps, hints |
-| `--ok` | `#1f7a4d` | same | approved, verified, savings |
-| `--warn` | `#b7791f` | same | pending, low confidence, SLA |
-| `--danger` | `#b42318` | same | rejected, blocked, breach |
-| `--info` | `#1d5f9f` | same | informational chips |
+| Token | Hex | Use |
+| --- | --- | --- |
+| `--navy` / `--navy-800` | `#16283f` | brand base, logo plate |
+| `--navy-900` | `#0d1a2b` | deepest surface, login brand panel |
+| `--navy-700` | `#223b57` | hover on navy, chart neutral |
+| `--gold` | `#c9a227` | primary action, active nav rail, focus ring |
+| `--gold-600` | `#a8861d` | pressed gold |
+| `--gold-300` | `#e3c766` | gold text on navy (active nav, accents) |
+| `--gold-contrast` | `#0d1a2b` | text on a gold fill (buttons, selection) |
+| `--surface` | `#0f1b2a` | app background |
+| `--surface-sunken` | `#0b1624` | shell backdrop behind the rail |
+| `--surface-alt` | `#142436` | cards, table headers |
+| `--surface-raised` | `#1a2c41` | drawers, popovers, inputs, hover rows |
+| `--line` | `#27384d` | borders, dividers |
+| `--line-strong` | `#33475f` | hover border |
+| `--ink` | `#eef2f7` | primary text |
+| `--ink-muted` | `#a9b7c7` | secondary text |
+| `--ink-subtle` | `#7a8a9d` | timestamps, hints |
+| `--sidebar` | `#0b1624` | navigation rail (one step darker than the page) |
+| `--sidebar-raised` | `#16283f` | rail footer plate, hover |
+| `--sidebar-ink` / `--sidebar-ink-muted` | `#e6ecf4` / `#93a4b8` | rail text, idle/hover |
+| `--ok` | `#1f7a4d` | approved, verified, matched, savings |
+| `--warn` | `#b7791f` | pending, partially received, low confidence |
+| `--danger` | `#b42318` | rejected, mismatch, overdue, breach |
+| `--info` | `#1d5f9f` | informational chips, in-transit |
 
 Status→tone mapping is centralised in `StatusChip` / `Badge` (`src/components/ui.tsx`), so a new
-status cannot pick an arbitrary colour.
+status cannot pick an arbitrary colour. The post-award statuses (`issued`, `in_transit`,
+`partially_received`, `received`, `confirmed`, `closed`, `matched`, `mismatch`, `incomplete`,
+`approved`, `partially_paid`, `paid`, `overdue`) are registered in the same map.
+
+Charts use `var(--gold)`, `var(--gold-300)`, `var(--info)`, `var(--navy-700)`, `var(--ok)` and
+`var(--warn)` in that order (`CHART_COLORS` in `DashboardPage.tsx`, `COLORS` in `AnalyticsPage.tsx`)
+— series stay inside the palette instead of inventing hues.
 
 ## 2. Typography
 
@@ -52,12 +71,18 @@ columns align across digits and locales.
 
 * Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 / 48 (`gap-1` … `gap-12`).
 * Radii: `--radius-xs 4px`, `--radius-sm 6px`, `--radius 10px`, `--radius-lg 16px`.
-* Shadows: `--shadow-card` (resting card), `--shadow-pop` (drawer, popover, dropdown).
+* Elevation is three steps only: `--shadow-1` (controls), `--shadow-2` / `--shadow-card` (resting
+  card), `--shadow-3` / `--shadow-pop` (drawer, popover). Cards also carry a 1px inset highlight so
+  the top edge reads as light rather than as another border.
 * Focus: `--focus-ring` rgba gold at 45%, always a 2px outline offset 2px — never removed.
 
 ## 4. Layout
 
-* Shell: 264px sidebar (72px collapsed), 64px topbar, content max-width 1600px with 24px gutters.
+* Shell: 264px rail (`--sidebar-width`) collapsing to 72px (`--sidebar-width-collapsed`), 56px
+  topbar (`--header-height`), content max-width 1440px with 24px gutters at `lg`.
+* The rail is collapsible and the choice persists in `localStorage` (`procureai.sidebar`). Collapsed
+  it keeps 44px hit targets, shows icons only with a tooltip/`aria-label`, and separates groups with
+  a hairline instead of a label.
 * Data-dense pages use a 12-column grid; the comparison matrix scrolls horizontally inside its card
   while the supplier column stays pinned.
 * Breakpoints follow Tailwind defaults; the sidebar collapses under 1024px, tables switch to
@@ -75,6 +100,13 @@ columns align across digits and locales.
 | Savings dashboard | `pages/AnalyticsPage.tsx` | KPIs, savings by category/supplier, price trend, forecast with bounds |
 | Agent activity feed | `pages/ActivityPage.tsx` | runs, steps, tool calls, policy decisions, latency and cost |
 | HITL verification drawer | `RfqDetailPage.tsx::VerificationDrawer` | per-field value, confidence, provenance span, one-click verify, request-missing-info |
+| Purchase order list | `pages/PurchaseOrdersPage.tsx` | status filter chips, open/awaiting KPIs, outstanding balance strip |
+| PO lifecycle | `pages/PurchaseOrderDetailPage.tsx` | gold stepper, ordered vs received vs available per line, receipt timeline, invoice drawer with the three-way match table |
+| Goods receipt drawer | `PurchaseOrderDetailPage.tsx::ReceiptDrawer` | per-line received/accepted/rejected quantities, warehouse, carrier, delivery note |
+| Requester sign-off | `PurchaseOrderDetailPage.tsx::ConfirmDrawer` | quantity/quality/spec/document checks, mandatory comment on reject |
+| Three-way match table | `PurchaseOrderDetailPage.tsx::InvoiceRow` | received vs invoiced vs available, price variance %, mismatch issue list |
+| Payment suggestion | `PurchaseOrderDetailPage.tsx::PaymentDrawer` | method/terms/priority + reason list, reference mandatory, explicit “no money moves here” note |
+| Supplier ledger | `PurchaseOrderDetailPage.tsx` sidebar card | invoiced / paid / outstanding / overdue + last ledger entries |
 | Public quote form | `pages/PublicFormPage.tsx` | no-login, tokenised, AR/EN, structured line pricing |
 | Supplier portal | `pages/PublicPortalPage.tsx` | masked contacts, category confirmation, pending-review notice |
 
@@ -92,16 +124,26 @@ pages that need it paginate through the API.
 1. `<html lang="ar" dir="rtl">` by default; the language toggle flips `lang`/`dir` and persists.
 2. Logical CSS properties only: `ms-*`, `me-*`, `ps-*`, `pe-*`, `text-start`, `text-end`. `left`/
    `right` appear only inside mirrored icons via `rtl:rotate-180` or `rtl:-scale-x-100`.
-3. Numbers stay Latin by default; the numerals toggle renders Arabic-Indic digits in *display*
-   contexts only (never in inputs or money fields).
+3. Numbers stay Latin in both languages (`ar-EG-u-nu-latn`): procurement teams read Western
+   numerals, and mixing numeral systems in a table breaks scanning. There is no numerals toggle.
 4. Dates and currency use `Intl` with the active locale; money always shows the ISO code
    (`1,234,500 EGP`).
 5. Charts mirror axis order under RTL; tooltips stay anchored to the cursor.
 
 ## 7. Accessibility (WCAG 2.1 AA target)
 
-* Contrast: body text ≥ 4.5:1, large text ≥ 3:1 against `--surface`/`--surface-alt` in both themes
-  (verified for navy-on-gold and gold-on-navy pairs).
+* Contrast: body text ≥ 4.5:1, large text ≥ 3:1 against `--surface` / `--surface-alt` /
+  `--surface-raised`. Measured pairs: `--ink #eef2f7` on `#0f1b2a` 15.4:1, `--ink-muted #a9b7c7` on
+  `#142436` 7.7:1, `--ink-subtle #7a8a9d` on `#142436` 4.46:1, `--gold-300 #e3c766` on `#0b1624`
+  10.9:1, sidebar `--sidebar-ink-muted #93a4b8` on `#0b1624` 7.1:1.
+* **Semantic colours are split into fill and ink.** The saturated `--ok/--warn/--danger/--info`
+  values are 2.4–4.3:1 as text on the card surface, so they are only ever used as fills, borders and
+  chart marks. Text uses `--ok-ink #4ec98c` (7.5:1), `--warn-ink #e8b25a` (8.2:1),
+  `--danger-ink #f2776b` (5.7:1) and `--info-ink #6fb0e8` (6.8:1), exposed through the same Tailwind
+  group (`text-ok-ink`, `text-danger-ink`, …). `TONE_CLASS` in `ui.tsx` is the only place that maps a
+  tone to a colour, so this rule cannot be bypassed per page.
+* Gold `#c9a227` is used as a *fill* with `--gold-contrast` text on top (7.2:1) or as `--gold-300`
+  text (10.9:1 on the rail); raw `--gold` is never small text on navy.
 * Every interactive element is a real `<button>`/`<a>`; clickable `<div>`/`<article>` is a lint error.
 * Focus is always visible; drawers and dialogs trap focus (`Drawer` restores it on close) and
   `useEscape` closes them.

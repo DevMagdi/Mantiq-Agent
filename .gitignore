@@ -5,6 +5,8 @@
 *.pem
 *.key
 secrets/
+# Written by `procureai bootstrap`; contains a generated SuperAdmin password.
+.dev-credentials
 
 # ---------------------------------------------------------------- python
 __pycache__/

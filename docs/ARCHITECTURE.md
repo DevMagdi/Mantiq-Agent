@@ -43,7 +43,7 @@ whether anything may be awarded.
 | Agents | `backend/app/agents/*` | orchestrator graph, tool registry, guardrails, policy engine, LLM abstraction |
 | Data | `backend/app/db/models/entities.py`, `migrations/versions/*` | 60+ tables, one Alembic chain (0001→0012) |
 | Adapters | `backend/app/adapters/*` | every external dependency behind an interface with a fake |
-| Web | `frontend/src/**` | 13 pages, 9 signature components, AR-RTL default + EN, dark + light |
+| Web | `frontend/src/**` | 15 pages over 17 routes, 11 signature components, AR-RTL default + EN, single navy theme |
 
 ## 2. Request lifecycle (the commercial spine)
 
@@ -124,7 +124,8 @@ on PostgreSQL, which keeps `alembic check` clean and comparisons correct in both
 
 ## 6. Frontend architecture
 
-* **Shell** — collapsible sidebar, topbar with notifications, locale and theme toggles, and a live
+* **Shell** — collapsible navy sidebar (grouped nav, gold active rail, RTL-aware), topbar with
+  notifications, locale toggle and a live-update indicator, and a live
   connection badge fed by the WebSocket hub.
 * **State** — TanStack Query for server state, tiny local stores for UI preferences; no global
   Redux-style store, no duplicated server state.

@@ -50,8 +50,9 @@ handler, mutating, requires_policy)`:
 | `get_price_benchmark` | `offer:read` | – | anonymised aggregates only |
 
 **Forbidden by construction** — `accept_offer`, `accept_counter_offer`, `sign_contract`, `sign`,
-`pay_invoice`, `execute_payment`, `change_specifications`, `change_spec`, `edit_rfq_specs`,
-`approve_offer`, `issue_po`, `commit_purchase`. An `assert` at import time fails the process if any
+`pay_invoice`, `execute_payment`, `record_payment`, `approve_invoice`, `create_invoice`,
+`confirm_receipt`, `accept_delivery`, `close_po`, `change_specifications`, `change_spec`,
+`edit_rfq_specs`, `approve_offer`, `issue_po`, `commit_purchase`. An `assert` at import time fails the process if any
 of these is ever registered, and `invoke_tool` refuses them by name before touching the session.
 
 Every call is validated (Pydantic), authorised (RBAC on the current user's roles), executed inside
@@ -127,6 +128,29 @@ table, writes `usage_event` rows per tenant, and records model/tokens/latency on
 | Extraction verification | `POST /extractions/{id}/verify` | unlocks comparison |
 | Negotiation draft | `POST /negotiations/{id}/send` | revalidated against the current policy, then sent |
 | Award approval | `POST /approvals/{id}/decide` | approve / reject / revision / split — the only way to a PO |
+| Goods receipt | `POST /purchase-orders/{id}/receipts` (`receipt:create`) | the warehouse records what physically arrived |
+| Delivery sign-off | `POST /receipts/{id}/confirm` (`receipt:confirm`) | the requesting team accepts quantity/quality/spec — the warehouse cannot sign off its own receipt |
+| Invoice approval | `POST /invoices/{id}/approve` (`invoice:approve`) | finance approves a matched invoice; a mismatch needs a written `override_reason` that lands in the audit trail |
+| Payment recording | `POST /invoices/{id}/payments` (`payment:record`) | finance books a transfer that already happened in the bank/ERP, with a mandatory reference |
+
+### The post-award loop has no agent at all
+
+Delivery and settlement are deliberately outside the orchestration graph (`STAGES` still ends at
+`approval`). There is no stage, no tool and no LLM call that can receive goods, match an invoice,
+approve it or move money:
+
+* `receiving.py` and `invoicing.py` are pure services invoked by named humans through RBAC-guarded
+  endpoints (`receipt:create`, `receipt:confirm`, `invoice:create`, `invoice:approve`,
+  `payment:record`, `ledger:read`).
+* The three-way match is **deterministic** (`compute_match`): quantities are compared with the
+  confirmed receipt, prices with the PO line within a 0.5% tolerance. The model never sees the raw
+  comparison and cannot mark anything as matched.
+* The payment *suggestion* (`suggest_payment`) is rule-based over supplier country, currency, value
+  and payment terms. Every result carries `requires_human_approval: true` and
+  `execution: "outside_platform"`, and there is no payment-execution adapter in the codebase to call.
+* `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool` fails the build if a
+  `record_payment`, `approve_invoice`, `create_invoice`, `confirm_receipt`, `accept_delivery` or
+  `close_po` tool is ever registered.
 
 ## 7. Evaluation harness
 
