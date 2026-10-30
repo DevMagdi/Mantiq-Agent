@@ -1,0 +1,74 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/ibm-plex-sans-arabic/400.css";
+@import "@fontsource/ibm-plex-sans-arabic/500.css";
+@import "@fontsource/ibm-plex-sans-arabic/600.css";
+@import "@fontsource/ibm-plex-sans-arabic/700.css";
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-ink antialiased;
+  }
+  /* Logical properties keep RTL layouts correct without mirrored overrides. */
+  .app-shell {
+    @apply flex min-h-screen;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface-alt shadow-card;
+  }
+  .card-header {
+    @apply flex items-center justify-between gap-3 border-b border-line px-4 py-3;
+  }
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium
+      transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-gold text-[color:var(--gold-contrast)] hover:bg-[color:var(--gold-600)];
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface-raised text-ink hover:border-gold;
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-surface-raised hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn bg-[color:var(--danger)] text-white hover:opacity-90;
+  }
+  .input {
+    @apply w-full rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink
+      placeholder:text-ink-subtle focus:border-gold focus:outline-none;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-ink-muted;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-2xs font-medium;
+  }
+  .table-dense {
+    @apply w-full border-collapse text-sm;
+  }
+  .table-dense thead th {
+    @apply sticky top-0 z-10 border-b border-line bg-surface-alt/95 px-3 py-2 text-start text-2xs
+      font-semibold uppercase tracking-wide text-ink-muted backdrop-blur;
+  }
+  .table-dense tbody td {
+    @apply border-b border-line/70 px-3 py-2 align-middle;
+  }
+  .table-dense tbody tr:hover {
+    @apply bg-surface-raised/60;
+  }
+  .skeleton {
+    @apply animate-shimmer rounded bg-line/60;
+  }
+}
