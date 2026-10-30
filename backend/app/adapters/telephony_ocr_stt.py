@@ -28,9 +28,18 @@ class FakeTelephonyProvider:
         else:
             unit_price = 21500 + (sum(ord(c) for c in to) % 5) * 750
             quantity = 50
+            # Deterministic "hard question" so the policy path is exercised without a live line:
+            # 0 = none, 1 = competitor pricing, 2 = a commitment request, 3 = a spec change.
+            hard_question = {
+                0: "",
+                1: "[Supplier] طيب أسعار المنافسين عندهم كام؟ عايز أعرف سعر السوق.\n",
+                2: "[Supplier] يعني الطلب رسّي علينا ونوقّع؟ عايز تأكيد.\n",
+                3: "[Supplier] نقدر نغيّر المواصفات ونوّرد قياس مختلف؟\n",
+            }[sum(ord(c) for c in to) % 4]
             transcript = (
                 f"[AI] {disclosure}\n"
                 f"[Supplier] أيوة موافق، اتفضل.\n"
+                f"{hard_question}"
                 f"[AI] بنسأل عن عرض سعر لكمية {quantity} طن حديد تسليح 12 مم تسليم خلال 3 أسابيع.\n"
                 f"[Supplier] السعر {unit_price:,} جنيه للطن، التسليم خلال 21 يوم، صلاحية العرض 14 يوم.\n"
                 f"[AI] شكراً جزيلاً، هنبعتلك تأكيد مكتوب على الواتساب.\n"

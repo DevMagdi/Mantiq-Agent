@@ -68,6 +68,12 @@ ALL_PERMISSIONS: dict[str, str] = {
     "audit_package:review": "Record the auditor's review decision on a document package",
     "report:read": "View analytics and reports",
     "comment:create": "Comment and mention colleagues",
+    "channel:read": "View channel preferences and communication status",
+    "channel:write": "Set supplier channel preferences and RFQ channel overrides",
+    "inbox:read": "Read the unified conversation inbox",
+    "inbox:reply": "Reply to a supplier from the unified inbox",
+    "assistant:use": "Ask the internal voice assistant (read-only, RBAC-scoped)",
+    "voice:call": "Start an outbound AI voice call to a supplier",
     "audit:read": "View audit trail and agent activity",
     "admin:users": "Manage users",
     "admin:roles": "Manage roles and permissions",
@@ -88,6 +94,8 @@ READ_ONLY_REQUESTER = {
     "comparison:read", "comment:create", "report:read", "settings:read",
     # The requesting team signs off on what the warehouse physically received.
     "po:read", "receipt:confirm",
+    # The assistant answers "where is my request?" without exposing anything else.
+    "assistant:use",
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
@@ -103,6 +111,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "receipt:create", "receipt:confirm", "invoice:create", "invoice:approve", "ledger:read",
         "accounting:read", "accounting:write", "cost:read", "cost:write", "audit_package:read",
         "report:read", "comment:create", "audit:read", "admin:templates", "settings:read",
+        "channel:read", "channel:write", "inbox:read", "inbox:reply", "assistant:use", "voice:call",
     },
     "buyer": {
         "pr:read", "pr:create", "pr:update", "pr:verify", "rfq:read", "rfq:create", "rfq:update",
@@ -111,6 +120,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "comparison:read", "approval:read", "po:create", "po:read", "invoice:create",
         "ledger:read", "accounting:read", "cost:read", "audit_package:read",
         "report:read", "comment:create", "settings:read",
+        "channel:read", "channel:write", "inbox:read", "inbox:reply", "assistant:use", "voice:call",
     },
     "requester": READ_ONLY_REQUESTER,
     "finance_approver": {
@@ -118,22 +128,25 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "approval:delegate", "po:read", "supplier:read", "invoice:create", "invoice:approve",
         "payment:record", "ledger:read", "accounting:read", "accounting:write", "cost:read",
         "audit_package:read", "report:read", "comment:create", "audit:read", "settings:read",
+        "assistant:use",
     },
     # The controller owns the books: drafts, posts and reverses, but never approves a purchase.
     "controller": {
         "pr:read", "rfq:read", "po:read", "supplier:read", "invoice:create", "invoice:approve",
         "payment:record", "ledger:read", "accounting:read", "accounting:write", "accounting:post",
         "accounting:reverse", "cost:read", "cost:write", "audit_package:read", "report:read",
-        "comment:create", "audit:read", "settings:read",
+        "comment:create", "audit:read", "settings:read", "assistant:use",
     },
     # Read-only on money, plus the audit gate: an auditor reviews packages, never posts or pays.
     "auditor": {
         "pr:read", "rfq:read", "offer:read", "comparison:read", "po:read", "supplier:read",
         "ledger:read", "accounting:read", "cost:read", "audit_package:read", "audit_package:review",
-        "approval:read", "approval:decide", "report:read", "comment:create", "audit:read", "settings:read",
+        "approval:read", "approval:decide", "report:read", "comment:create", "audit:read",
+        "settings:read", "assistant:use", "inbox:read", "channel:read",
     },
     "warehouse": {
-        "po:read", "receipt:create", "supplier:read", "comment:create", "report:read", "settings:read",
+        "po:read", "receipt:create", "supplier:read", "comment:create", "report:read",
+        "settings:read", "assistant:use",
     },
 }
 

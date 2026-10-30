@@ -125,15 +125,32 @@ class EmailProvider(Protocol):
 
 @runtime_checkable
 class WhatsAppProvider(Protocol):
+    """WhatsApp is a first-class channel: text, templates, documents, interactive quotes and receipts.
+
+    `supports_templates` / `supports_documents` / `supports_interactive` let the service degrade to
+    plain text when a provider (or a tenant's approved template set) cannot do the richer form,
+    instead of failing the send.
+    """
+
     name: str
 
     async def send_text(self, *, to: str, body: str, template: str = "") -> SendResult: ...
 
     async def send_template(self, *, to: str, template: str, variables: list[str]) -> SendResult: ...
 
+    async def send_document(self, *, to: str, filename: str, data: bytes, caption: str = "",
+                            mime: str = "") -> SendResult: ...
+
+    async def send_interactive(self, *, to: str, body: str, options: list[str],
+                               flow: str = "") -> SendResult: ...
+
+    async def download_media(self, media_id: str) -> tuple[bytes, str]: ...
+
     def verify_webhook(self, body: bytes, signature: str) -> bool: ...
 
     def parse_webhook(self, payload: dict[str, Any]) -> list[InboundMessage]: ...
+
+    def parse_statuses(self, payload: dict[str, Any]) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

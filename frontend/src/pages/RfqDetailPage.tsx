@@ -16,6 +16,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { PageHeading } from "@/components/Shell";
+import { RfqChannelPanel } from "@/components/RfqChannelPanel";
 import {
   Badge,
   Card,
@@ -181,6 +182,9 @@ export default function RfqDetailPage() {
                 {data.suppliers.length === 0 ? <EmptyState title={t("common.empty")} /> : null}
               </div>
             </Card>
+          </div>
+          <div className="mt-4">
+            <RfqChannelPanel rfqId={data.id} onSent={() => void refresh()} />
           </div>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <Card>

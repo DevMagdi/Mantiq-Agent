@@ -38,7 +38,7 @@ def build(name: str) -> Any:
     if name == "whatsapp":
         if settings.whatsapp_provider == "cloud_api" and settings.whatsapp_token:
             return CloudWhatsAppProvider(settings.whatsapp_token, settings.whatsapp_phone_id,
-                                         settings.whatsapp_verify_token)
+                                         settings.whatsapp_app_secret, settings.whatsapp_quote_flow_id)
         return FakeWhatsAppProvider(settings.whatsapp_verify_token)
 
     if name == "telephony":

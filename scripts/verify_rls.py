@@ -165,6 +165,36 @@ async def main() -> int:
                 else:
                     check(f"{table} rejects {verb}", False, "statement ran")
 
+        # ------------------------------------------------------------------ phase 3: channels & voice
+        # The communication layer is tenant-scoped like the rest, and the three evidence tables
+        # (channel events, call turns, assistant turns) are append-only: an audit trail that can be
+        # edited is not an audit trail.
+        channel_tables = ("channel_event", "voice_call_turn", "assistant_session", "assistant_turn")
+        for table in channel_tables:
+            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+            own_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
+            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[1])
+            foreign_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
+            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+            check(f"{table} is tenant-isolated", foreign_rows == 0,
+                  f"{own_rows} own row(s), {foreign_rows} visible to another tenant")
+
+        channel_append_only = {"channel_event": "kind", "voice_call_turn": "decision",
+                               "assistant_turn": "role"}
+        for table, column in channel_append_only.items():
+            for verb, statement in (
+                ("UPDATE", f"UPDATE {table} SET {column} = {column}"),
+                ("DELETE", f"DELETE FROM {table}"),
+            ):
+                try:
+                    await conn.execute(statement)
+                except asyncpg.InsufficientPrivilegeError:
+                    check(f"{table} rejects {verb}", True, "no grant for the app role")
+                except asyncpg.RaiseError as exc:
+                    check(f"{table} rejects {verb}", "append-only" in str(exc), "trigger")
+                else:
+                    check(f"{table} rejects {verb}", False, "statement ran")
+
         # Two independent guards: the append-only trigger, and the missing UPDATE/DELETE grant
         # for the application role. Either one refusing the statement is a pass.
         for statement in ("UPDATE audit_log SET action = action", "DELETE FROM audit_log"):

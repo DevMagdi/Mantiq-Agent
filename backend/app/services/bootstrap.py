@@ -42,6 +42,17 @@ from app.services.catalog_data import (
 
 log = logging.getLogger("procureai.bootstrap")
 
+#: Template code -> kind, so the library can group invitations, reminders, negotiation and scripts.
+TEMPLATE_KINDS = {
+    "rfq_invitation": "invitation",
+    "reminder": "reminder",
+    "counter_offer": "negotiation",
+    "quote_request": "quote_request",
+    "missing_info": "clarification",
+    "clarification": "clarification",
+    "voice_script": "voice_script",
+}
+
 
 async def seed_reference_data(session: AsyncSession) -> dict:
     """Idempotent reference data: roles, permissions, plans, taxonomy, units, templates, call policy."""
@@ -120,11 +131,16 @@ async def seed_tenant_defaults(session: AsyncSession, tenant: Tenant) -> dict:
                                           MessageTemplate.locale == template["locale"])
         )).scalar_one_or_none()
         if not exists:
+            from app.services.messaging import template_variables
+
             session.add(MessageTemplate(
                 tenant_id=tenant.id, code=template["code"], channel=template["channel"],
                 locale=template["locale"], name=template["name"],
                 subject=template.get("subject", ""), body=template["body"],
                 whatsapp_template_name=template.get("whatsapp_template_name", ""),
+                kind=TEMPLATE_KINDS.get(template["code"], "invitation"),
+                description=f"{template['name']} · {template['channel']}/{template['locale']}",
+                variables=template_variables(template["body"]),
             ))
             created["templates"] += 1
 

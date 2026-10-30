@@ -213,6 +213,11 @@ async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str
             email=definition["email"], phone=definition["phone"], language=definition.get("language", "ar"),
             categories=[definition["category"]], confidence=0.95, created_by=users["buyer"].id,
         )
+        # Demo channel preferences: the market default is WhatsApp, recorded *without* consent so
+        # resolution falls back to email until someone records an opt-in. That is the honest state.
+        supplier.preferred_channel = "whatsapp" if _index % 3 != 2 else "email"
+        supplier.secondary_channels = ["email"] if supplier.preferred_channel == "whatsapp" else ["whatsapp"]
+        supplier.preferred_language = definition.get("language", "ar")
         score = definition.get("score", 75)
         supplier.rating_price = Decimal(str(score - 4))
         supplier.rating_lead_time = Decimal(str(min(100, score + 3)))

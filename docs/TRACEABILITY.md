@@ -12,7 +12,7 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (583 backend tests, 66 frontend tests) and coverage are reproduced in
+Test counts (659 backend tests, 74 frontend tests) and coverage are reproduced in
 `docs/PR_DESCRIPTION.md`.
 
 ## Functional requirements
@@ -76,6 +76,24 @@ FR-RFQ-2) are **not claimed**. Area-level coverage of the full commercial spine 
 reply → verification → comparison → negotiation → approval → PO → analytics — is proven end to end
 by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 
+## Phase 3 — multi-channel, WhatsApp and AI voice
+
+The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2.2, 3), not with
+`FR-*` codes, so the rows below trace to those section numbers rather than inventing IDs.
+
+| Spec item | Requirement | Implementation | Proof | Status |
+| --- | --- | --- | --- | --- |
+| 1.1 | Per-supplier preferred + secondary channel; per-RFQ override; mixed channels in one RFQ; the active channel is visible per supplier | `channels.resolve` / `set_rfq_channel` / `rfq_channels`, `supplier_channels`, `GET/PUT /rfqs/{id}/channels*`, `RfqChannelPanel`, `SupplierChannelsPanel` | `tests/test_services_channels.py` (12: precedence, override, mixed RFQ, consent fallback, masked addresses, per-channel opt-out on any channel), `tests/test_api_channels.py` (18) | Done |
+| 1.2 | WhatsApp: RFQ/follow-up/negotiation/reminder sending, rich messages (text + documents + structured quote request), inbound processing with offer extraction from text *and* attachments, searchable history per supplier and RFQ, delivery/read status, bilingual templates, opt-in/opt-out | `WhatsAppProvider.send_text/send_template/send_document/send_interactive/download_media`, `whatsapp_channel.send_rich/ingest_inbound_whatsapp/apply_delivery_status`, `messaging.check_dispatch` | `tests/test_services_whatsapp.py` (11: text, template, document, interactive quote request, inbound text/audio/document, receipts never regress, consent, unmatched), `tests/test_adapters.py` | Done — Meta transport behind credentials (fake exercised) |
+| 1.3 | Voice: outbound human- and AI-initiated calls, full logging, consent-gated recording, linked to RFQ + supplier | `voice.start_call`, `voice_agent.run_ai_call`, `voice_call` / `voice_call_turn` | `tests/test_services_voice.py`, `tests/test_services_voice_agent.py` (9), `tests/test_api_channels.py` (call log + console) | Done — media bridge is a documented adapter seam |
+| 1.4 | Email: templates, tracking, threading, fallback when WhatsApp is unavailable | `messaging.send_message`, templates seeded per channel, `channels.resolve` fallback chain | `tests/test_services_channels.py` (fallback with a reason), `tests/test_services_reminders_templates.py` | Done |
+| 1.5 | Unified inbox across channels with the channel marked and reply-on-the-same-channel | `inbox.conversations/thread_detail/reply/search`, `GET/POST /inbox*`, `InboxPage` | `tests/test_services_inbox.py` (7), `tests/test_api_channels.py` (inbox endpoints) | Done |
+| 2.1 | Outbound AI voice agent: disclosure first, recording only with consent, approved-question answers, hard blocks (competitors, commitments, spec changes), transcript + extraction into human verification, full audit | `voice_agent.classify_question/approved_knowledge/run_ai_call`, `voice_call_turn`, `policy_snapshot.ai_agent` | `tests/test_services_voice_agent.py` (9: disclosure, consent refusal, all four block codes, extraction, audit), `frontend/src/pages/VoiceCallsPage.tsx` | Done — scripted media, real policy engine |
+| 2.2 | Internal assistant for requester/buyer/manager/warehouse/finance: PR create/clarify, P2P status, offer/recommendation summaries, balances, comms history; RBAC-strict, audited, unable to approve/award/sign/post | `assistant.classify/ask`, `INTENT_PERMISSIONS`, `_ownership_ok`, `FORBIDDEN_PATTERNS`, `assistant_session/turn` | `tests/test_services_assistant.py` (11: per-role scoping, forbidden verbs, read-only guarantees), `tests/test_api_channels.py`, `frontend/src/pages/AssistantPage.tsx` | Done |
+| 3 | Template library (AR+EN) for WhatsApp/email/voice, reminders on the preferred channel, per-supplier comm status (sent/delivered/replied/no response), mid-conversation channel switch with history preserved, logging/search, consent + opt-out per channel | `catalog_data.DEFAULT_TEMPLATES` (20 rows), `channels.refresh_comm_status`, `channels.switch_channel`, `inbox.search`, `OptInRegistry` | `tests/test_services_reminders_templates.py` (8), `tests/test_services_channels.py`, `tests/test_services_whatsapp.py`, `frontend/src/pages/TemplatesPage.tsx` | Done |
+| 4 (technical) | Built on the existing adapters; WhatsApp first-class; full AR RTL + EN including templates and voice prompts; everything audited; feature flags for AI voice; clean RBAC; UX for channel choice and the inbox | `features.py`, migration `0016` (RLS + append-only), `app/core/rbac.py`, `frontend/src/pages/{InboxPage,SettingsPage}.tsx` | `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off`, `tests/test_frontend_permissions.py`, `frontend/src/pages/channels.test.tsx` (8) | Done |
+| 5 (testing) | Channel selection + mixed RFQs, WhatsApp send/receive/extraction, AI voice (disclosure, consent, policy blocks, transcript, extraction), assistant across roles, reminders + templates, inbox, flags on/off, integration with offer verification | the seven phase-3 test modules | `pytest tests` (659) — of which 76 phase-3 backend tests; `npx vitest run` (74) | Done |
+
 ## Non-functional requirements
 
 | ID | Requirement | Implementation | Proof | Status |
@@ -90,8 +108,11 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 | NFR-PERF-1 | Indexes for list, board, audit and full-text paths; 50 concurrent users served | migration `0011_indexes_search_vectors`, `scripts/load_test.py` | `alembic check` on PostgreSQL 16 (CI job `postgres`); load test PASS: 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors (`docs/LOAD_TEST.md`) | Done |
 | NFR-PERF-2 | Reply parsing bounded (20k chars, no unbounded LLM context) | `app/services/extraction.py` | `tests/test_services_extraction.py` | Done |
 | NFR-PRV-1 | Data-subject rights with statutory deadlines | `app/services/privacy.py`, `data_erasure_request.due_at` | `tests/test_services_privacy_portal.py` | Done |
-| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (60 tests), `frontend/src/styles/tokens.test.ts` (single theme, no `prefers-color-scheme`, every text pair ≥ 4.5:1), contrast matrix in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI; contrast, focus and RTL are asserted, not audited by a browser |
+| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (74 tests), `frontend/src/styles/tokens.test.ts` (single theme, no `prefers-color-scheme`, every text pair ≥ 4.5:1), contrast matrix in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI; contrast, focus and RTL are asserted, not audited by a browser |
 | NFR-OPS-1 | Health/readiness/observability | `app/main.py` `/health` `/ready` `/metrics` | `tests/test_api_flow.py` | Done |
+| NFR-AI-3 | Channel and voice agents must be unable to commit the company, disclose competitors or change specifications; every block is recorded | `voice_agent.classify_question`, `assistant.FORBIDDEN_PATTERNS`, `channel_event` / `voice_call_turn` | `tests/test_services_voice_agent.py` (four block codes + refusal text), `tests/test_services_assistant.py` (`ASSISTANT_FORBIDDEN_ACTION`) | Done |
+| NFR-SEC-5 | Supplier consent is per channel and honoured in the supplier's own words before any parsing | `messaging.handle_consent_keyword` (STOP/START, AR+EN), `OptInRegistry`, `channel_event` | `tests/test_services_whatsapp.py::test_a_stop_keyword_opts_the_supplier_out_and_stops_the_pipeline`, `tests/test_services_channels.py::test_an_email_unsubscribe_is_honoured_before_extraction_on_any_channel` | Done |
+| NFR-OPS-2 | Communication evidence is append-only at the database level | migration `0016` (`REVOKE UPDATE, DELETE`), `scripts/verify_rls.py` phase-3 block | CI job `postgres` (`verify_rls.py`) | Done |
 | NFR-DATA-2 | PostgreSQL 16 is the only supported datastore; tenant isolation enforced by the database | `app/core/config.py` (`database_url`, `allow_sqlite_fallback`), `app/main.py` (`_assert_supported_database`), migration `0010_rls_policies_and_grants` | `scripts/verify_rls.py` (own rows visible / foreign rows 0 / cross-tenant write blocked / audit append-only), CI job `postgres` | Done |
 
 ## Acceptance criteria (spot-checked)
@@ -114,14 +135,25 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 | AC-ACC-2 | A posted entry cannot be reversed twice, and a reversal without a reason is refused | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` |
 | AC-ACC-3 | The trial balance stays balanced after every posting, including reversals | `tests/test_services_accounting.py`, `tests/test_api_p2p_accounting_e2e.py` |
 | AC-ACC-4 | Only a human holding `accounting:post` posts, and never their own manual entry | `tests/test_api_accounting.py` (`segregation_of_duties`) |
+| AC-CHAN-1 | A channel is only chosen when it is reachable and consented; the refusal names every rejected candidate and why | `tests/test_services_channels.py` (`reasons`, `candidates`), `frontend/src/components/RfqChannelPanel.tsx` |
+| AC-CHAN-2 | A buyer override on an unreachable channel is refused unless a reason is supplied, and the reason is audited | `tests/test_services_channels.py`, `tests/test_api_channels.py` |
+| AC-WA-1 | A structured quote request is always deliverable: an empty body still produces a bilingual prompt | `tests/test_services_whatsapp.py` |
+| AC-WA-2 | A late `delivered` receipt after `read` does not move the status backwards | `tests/test_services_whatsapp.py::test_delivery_and_read_receipts_move_forward_but_never_backwards` |
+| AC-VOX-1 | No recording exists without consent, and the call is still logged | `tests/test_services_voice.py`, `tests/test_services_voice_agent.py` |
+| AC-VOX-2 | A competitor-price, commitment, sign or spec-change question gets a fixed refusal and a `block_code` on the turn | `tests/test_services_voice_agent.py` (four topics) |
+| AC-ASST-1 | No phrase makes the assistant approve, award, sign, pay or post; the response carries `can_act: false` | `tests/test_services_assistant.py`, `tests/test_api_channels.py` |
+| AC-ASST-2 | A requester asking about someone else's document gets `ASSISTANT_NOT_FOUND`, and the number is never returned | `tests/test_services_assistant.py` |
+| AC-FLAG-1 | With a flag off, the endpoint refuses with `BLOCK_FEATURE_OFF` instead of erroring, and works again when it is back on | `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off` |
 | AC-ACC-5 | Cost never leaves the analytical dimension: an inventory debit without a cost centre is refused | `tests/test_services_accounting.py::test_a_cost_debit_without_a_cost_centre_is_refused` |
 
 ## What is not covered here
 
 1. Real third-party clients (Anthropic/OpenAI, Twilio, Meta Cloud API, Paymob, ERP HTTP endpoints)
-   are implemented but not exercised: tests use their deterministic fakes.
+   are implemented but not exercised: tests use their deterministic fakes. For phase 3 this means
+   WhatsApp is proven against the fake Cloud API provider and voice against the scripted telephony
+   provider — the provider contract is exercised, the live service is not.
 2. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
-   production build, TypeScript strict typecheck, ESLint, and 34 component/interaction tests.
+   production build, TypeScript strict typecheck, ESLint, and 74 component/interaction tests.
 3. pgvector *similarity ranking* is not implemented (the columns and HNSW indexes exist and are
    verified on PostgreSQL 16, but no service computes embeddings yet); search falls back to the
    trigram path.

@@ -572,16 +572,33 @@ async def request_missing(extraction_id: str, ctx: Context = Depends(require("ne
     return result
 
 
+@router.get("/inbound/{channel}", include_in_schema=False, summary="Meta webhook verification handshake")
+async def inbound_verify(channel: str, request: Request):
+    """Meta calls this once (GET) to verify the callback; we echo `hub.challenge` on a token match."""
+    from app.core.config import settings
+
+    params = request.query_params
+    if params.get("hub.mode") == "subscribe" and \
+            params.get("hub.verify_token") == settings.whatsapp_verify_token:
+        return Response(content=params.get("hub.challenge", ""), media_type="text/plain")
+    return Response(status_code=403, content="verification failed")
+
+
 @router.post("/inbound/{channel}", summary="Inbound webhook (email/WhatsApp) with signature verification")
 async def inbound(channel: str, request: Request):
-    """Provider webhook. In production the signature is verified before any parsing."""
+    """Provider webhook. In production the signature is verified before any parsing.
+
+    WhatsApp goes through the phase-3 channel service, which handles delivery receipts, consent
+    keywords and media downloads *before* the shared extraction pipeline sees the text.
+    """
     from app.adapters.base import registry
     from app.core.config import settings
     from app.db.session import SessionLocal
+    from app.services import whatsapp_channel
 
     body = await request.body()
+    provider = registry.resolve("whatsapp") if channel == "whatsapp" else None
     if channel == "whatsapp":
-        provider = registry.resolve("whatsapp")
         signature = request.headers.get("x-hub-signature-256", "")
         if settings.whatsapp_provider == "cloud_api" and not provider.verify_webhook(body, signature):
             return Response(status_code=401, content='{"error":"invalid signature"}')
@@ -591,15 +608,15 @@ async def inbound(channel: str, request: Request):
         )).scalar_one_or_none()
         if not tenant:
             raise NotFound("Tenant not found.")
+        payload = await request.json()
         if channel == "whatsapp":
-            payload = await request.json()
-            provider = registry.resolve("whatsapp")
-            messages = provider.parse_webhook(payload)
-        else:
-            payload = await request.json()
-            messages = [InboundMessage(channel="email", external_id=payload.get("message_id", ""),
-                                       sender=payload.get("from", ""), subject=payload.get("subject", ""),
-                                       body=payload.get("body", ""))]
+            handled = await whatsapp_channel.handle_webhook(session, tenant, payload)
+            await session.commit()
+            return {"processed": handled["processed"], "statuses": handled["statuses"],
+                    "results": handled["messages"]}
+        messages = [InboundMessage(channel="email", external_id=payload.get("message_id", ""),
+                                   sender=payload.get("from", ""), subject=payload.get("subject", ""),
+                                   body=payload.get("body", ""))]
         results = [await ingest_inbound(session, tenant, message) for message in messages]
         await session.commit()
     return {"processed": len(results), "results": results}

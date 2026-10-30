@@ -203,10 +203,71 @@ DELETE`), so a posted number cannot be rewritten behind the API — corrections 
 `invoice_not_approved`, `match_not_clean`, `audit_review_required`, `segregation_of_duties`,
 `already_posted`, `already_reversed`, `reversal_reason_required`.
 
+## Channels, inbox, voice and assistant (phase 3)
+
+**Channel resolution.** Every outbound supplier message asks `services/channels.resolve()`. The order
+is: an RFQ-level override (if set) → the supplier's preferred channel → its secondary channels →
+`whatsapp, voice, email, web_form`. A channel is only chosen when it is *reachable*: a phone on file
+for WhatsApp/voice, an address for email, an active (non-blacklisted) supplier, an explicit opt-in for
+WhatsApp/voice, and the tenant feature switch on. `GET /rfqs/{id}/channels` returns the resolved
+channel, the reason it was chosen (`supplier_preference`, `secondary_preference`, `rfq_override`,
+`fallback`), the per-channel reasons it was not (`no_consent`, `no_phone`, `feature_off`,
+`supplier_blacklisted`) and the communication status (`pending → sent → delivered → read → replied`,
+`no_response` after the deadline).
+
+```bash
+# Override one supplier on one RFQ (null clears the override)
+curl -X PUT /api/v1/rfqs/$RFQ/suppliers/$SUPPLIER/channel \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"channel":"voice","reason":"Supplier asked for a call"}'
+
+# Send a structured quote request (one interactive message: price, lead time, validity)
+curl -X POST /api/v1/rfqs/$RFQ/whatsapp -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"supplier_id":"'$SUPPLIER'","quote_request":true,"locale":"ar"}'
+```
+
+**WhatsApp provider contract** (`app/adapters/whatsapp.py`): `send_text`, `send_template`,
+`send_document`, `send_interactive(to, body, options, flow)`, `download_media(media_id)`,
+`verify_webhook(body, signature)`, `parse_webhook`, `parse_statuses`, `parse_consent_events`.
+The Cloud API adapter uses the WhatsApp Flow when `whatsapp_quote_flow_id` is configured and falls
+back to reply buttons otherwise.
+
+**Webhook.** `GET /api/v1/inbound/{channel}` answers Meta's verification handshake (echoes
+`hub.challenge` when `hub.verify_token` matches `WHATSAPP_VERIFY_TOKEN`). `POST /api/v1/inbound/whatsapp`
+verifies `X-Hub-Signature-256` in `cloud_api` mode, then processes, in this order: delivery receipts →
+consent events (`STOP` / `START`) → messages (media downloaded and transcribed/extracted) → the shared
+extraction pipeline. The tenant is chosen with the `x-tenant-slug` header (default `nile`).
+
+**Inbox.** `GET /inbox` groups messages by (RFQ, supplier) thread, not by channel, so a WhatsApp reply
+appears next to the email that started the thread. `reply_channel` is the channel of the supplier's
+last inbound message; `POST /inbox/threads/{id}/reply` sends there unless `channel` is passed. A
+reply is refused (`channel_unavailable`) when consent or a reachable address is missing.
+
+**AI voice.** `POST /voice/calls` with `mode=ai` runs: feature flag → tenant flag → country calling
+hours → opt-in → dial → disclosure → consent → script → transcript → per-turn policy classification →
+extraction into the ordinary human verification queue. `mode=human` returns a bilingual script for a
+person to dial. `GET /voice/calls/{id}` returns the transcript, every policy turn with its
+`block_code` and the policy snapshot stored on the call.
+
+**Assistant.** `POST /assistant/ask` answers inside the caller's permissions only. Intents:
+`help`, `document_status`, `my_requests`, `offer_summary`, `recommendation`, `supplier_balance`,
+`supplier_communications`, `pr_create` (drafts a requisition; never submits), and `forbidden` for
+approve/award/sign/pay. `POST /assistant/transcribe?ask=true` chains speech-to-text into the same
+answer in one round trip. Every turn is stored and audited.
+
+**Error and verdict codes.** WhatsApp sends return `200` with `ok: false` and a verdict rather than an
+HTTP error — `BLOCK_NO_OPT_IN`, `BLOCK_FEATURE_OFF`, `BLOCK_CHANNEL_UNAVAILABLE` or `BLOCK_POLICY` — because the
+refusal is evidence and must be stored. HTTP errors: `404` unknown supplier/RFQ/thread, `422`
+`channel_unavailable` (with `reasons`) when an override targets an unreachable channel without a
+reason, `403` for a missing permission. Assistant verdicts: `ASSISTANT_PERMISSION`,
+`ASSISTANT_FORBIDDEN_ACTION`, `ASSISTANT_NOT_FOUND`. Voice policy codes: `COMPETITOR_DISCLOSURE`,
+`ACCEPT_INTENT`, `SPEC_CHANGE`, `SIGN_INTENT`, `PAYMENT_EXECUTION`.
+
 ## Endpoint inventory
 
 The table below is generated from the live OpenAPI schema of the running application
-(182 operations).
+(207 operations).
 
 | Method | Path | Summary | Tag |
 | --- | --- | --- | --- |
@@ -242,6 +303,10 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/approvals/escalate` | Run SLA escalation for overdue approvals | rfq |
 | POST | `/api/v1/approvals/{approval_id}/decide` | Approve / reject / request revision / split award | rfq |
 | POST | `/api/v1/approvals/{approval_id}/delegate` | Delegate an approval | rfq |
+| POST | `/api/v1/assistant/ask` | Ask the internal assistant (read-only, RBAC-scoped) | channels |
+| GET | `/api/v1/assistant/sessions` | My recent assistant conversations | channels |
+| GET | `/api/v1/assistant/sessions/{session_id}` | One assistant conversation, turn by turn | channels |
+| POST | `/api/v1/assistant/transcribe` | Transcribe a spoken question (STT) without trusting it | channels |
 | GET | `/api/v1/audit` | Append-only audit trail | admin |
 | POST | `/api/v1/audit-packages/{package_id}/review` | Auditor accepts the evidence or raises a query | accounting |
 | POST | `/api/v1/auth/change-password` | Change password (enforces the password policy) | identity |
@@ -266,8 +331,9 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/billing/usage` | Usage metering against plan limits | admin |
 | GET | `/api/v1/billing/usage-export` | Export usage events (CSV) | admin |
 | GET | `/api/v1/categories` | List tenant categories | intake |
-| GET | `/api/v1/comments` | List comments for an RFQ or PR | admin |
+| GET | `/api/v1/channels/capabilities` | Available supplier channels and their state | channels |
 | POST | `/api/v1/comments` | Comment on an RFQ/PR with @mentions | admin |
+| GET | `/api/v1/comments` | List comments for an RFQ or PR | admin |
 | GET | `/api/v1/dashboard` | Dashboard payload (KPIs, spend, trends, forecast) | admin |
 | GET | `/api/v1/data-export` | Data-subject export (JSON bundle) | admin |
 | GET | `/api/v1/erasure-requests` | List erasure requests | admin |
@@ -281,6 +347,11 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/extractions/{extraction_id}/request-missing-info` | Ask the supplier for missing data | rfq |
 | POST | `/api/v1/extractions/{extraction_id}/verify` | Verify the whole extraction and unlock comparison | rfq |
 | POST | `/api/v1/inbound/{channel}` | Inbound webhook (email/WhatsApp) with signature verification | rfq |
+| GET | `/api/v1/inbox` | Unified conversation inbox across every channel | channels |
+| GET | `/api/v1/inbox/search` | Search every message on every channel | channels |
+| GET | `/api/v1/inbox/threads/{thread_id}` | One conversation across all channels | channels |
+| GET | `/api/v1/inbox/threads/{thread_id}/events` | The channel event trail of one thread | channels |
+| POST | `/api/v1/inbox/threads/{thread_id}/reply` | Reply on the channel the supplier used | channels |
 | POST | `/api/v1/intake/email` | Email-to-PR (inbound address / forwarded mail) | intake |
 | POST | `/api/v1/intake/excel/confirm` | Confirm mapping and create the requisition | intake |
 | POST | `/api/v1/intake/excel/preview` | Upload Excel/CSV and preview auto-mapping + validation | intake |
@@ -345,8 +416,9 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/rfqs` | List RFQs | rfq |
 | POST | `/api/v1/rfqs` | Create an RFQ from a requisition | rfq |
 | GET | `/api/v1/rfqs/board` | Kanban board grouped by stage with deadline chips | rfq |
-| GET | `/api/v1/rfqs/{rfq_id}` | RFQ detail (lines, invitations, offers, messages, policy) | rfq |
 | PATCH | `/api/v1/rfqs/{rfq_id}` | Update RFQ settings / move stage on the board | rfq |
+| GET | `/api/v1/rfqs/{rfq_id}` | RFQ detail (lines, invitations, offers, messages, policy) | rfq |
+| GET | `/api/v1/rfqs/{rfq_id}/channels` | Resolved channel and communication status per supplier | channels |
 | POST | `/api/v1/rfqs/{rfq_id}/close` | Close an RFQ | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}/comparison` | Offer comparison matrix with TCO and weighted scores | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/dispatch` | Send the RFQ to invited suppliers (email/WhatsApp/web link) | rfq |
@@ -354,19 +426,24 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/rfqs/{rfq_id}/messages` | Thread timeline for an RFQ (all suppliers) | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/messages` | Send a manual message to a supplier | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/negotiate` | Draft (and optionally send) a policy-checked counter-offer | rfq |
-| GET | `/api/v1/rfqs/{rfq_id}/policy` | Active negotiation policy | rfq |
 | PUT | `/api/v1/rfqs/{rfq_id}/policy` | Create a versioned negotiation policy | rfq |
+| GET | `/api/v1/rfqs/{rfq_id}/policy` | Active negotiation policy | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}/preview` | Template preview (AR/EN) before sending | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/recommend` | Top-3 recommendation with traceable justification | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/reminders` | Run the reminder cadence for this RFQ | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/request-approval` | Start the multi-level approval chain | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/simulate-reply` | Inject a supplier reply through the real parsing pipeline | rfq |
+| PUT | `/api/v1/rfqs/{rfq_id}/suppliers/{supplier_id}/channel` | Override the channel for one supplier on this RFQ (null clears it) | channels |
+| POST | `/api/v1/rfqs/{rfq_id}/suppliers/{supplier_id}/switch-channel` | Move the live conversation to another channel | channels |
 | GET | `/api/v1/rfqs/{rfq_id}/suppliers/{supplier_id}/timeline` | Negotiation timeline + reasoning | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/voice-calls` | Start an AI supplier call (disclosure + consent) | rfq |
 | PUT | `/api/v1/rfqs/{rfq_id}/weights` | Set comparison weights for this RFQ | rfq |
+| POST | `/api/v1/rfqs/{rfq_id}/whatsapp` | Send a rich WhatsApp message to a supplier | channels |
 | GET | `/api/v1/roles` | Role catalogue with the permission matrix (UI mirror of RBAC) | identity |
 | GET | `/api/v1/settings` | Tenant settings | admin |
 | PATCH | `/api/v1/settings` | Update tenant settings | admin |
+| GET | `/api/v1/settings/features` | Tenant feature flags for channels and AI voice | channels |
+| PATCH | `/api/v1/settings/features` | Turn channel / AI-voice features on or off | channels |
 | GET | `/api/v1/supplier-balances` | Outstanding balance per supplier | orders |
 | GET | `/api/v1/suppliers` | List/search suppliers | intake |
 | POST | `/api/v1/suppliers` | Create a supplier | intake |
@@ -378,17 +455,26 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/suppliers/{supplier_id}` | Supplier detail with contacts (PII decrypted for authorised users) | intake |
 | GET | `/api/v1/suppliers/{supplier_id}/balance` | Ledger and balance for one supplier | orders |
 | POST | `/api/v1/suppliers/{supplier_id}/certifications` | Add a certification | intake |
+| GET | `/api/v1/suppliers/{supplier_id}/channels` | Channel preferences and reachability | channels |
+| PATCH | `/api/v1/suppliers/{supplier_id}/channels` | Set the preferred and secondary channels | channels |
 | POST | `/api/v1/suppliers/{supplier_id}/flags` | Blacklist / prefer / approve a supplier | intake |
+| POST | `/api/v1/suppliers/{supplier_id}/opt-in` | Record consent for one channel | channels |
 | POST | `/api/v1/suppliers/{supplier_id}/portal-link` | Signed, expiring supplier self-service link | intake |
 | POST | `/api/v1/suppliers/{supplier_id}/ratings` | Record supplier rating inputs | intake |
+| POST | `/api/v1/suppliers/{supplier_id}/whatsapp/document` | Send a document to a supplier over WhatsApp | channels |
 | GET | `/api/v1/taxonomy` | UNSPSC-based taxonomy (searchable) | intake |
 | GET | `/api/v1/templates` | Message templates (per channel and locale) | rfq |
 | POST | `/api/v1/templates` | Create or version a template | rfq |
+| GET | `/api/v1/templates/library` | Templates per channel and locale, with their variables | channels |
 | GET | `/api/v1/unit-conversions` | Unit conversion table used by normalization | intake |
 | GET | `/api/v1/users` | List tenant users | identity |
 | POST | `/api/v1/users` | Create a tenant user | identity |
 | PATCH | `/api/v1/users/{user_id}` | Update a tenant user | identity |
 | GET | `/api/v1/voice-calls/{call_id}` | Voice call console state | rfq |
+| POST | `/api/v1/voice/calls` | Place an outbound AI call (disclosure + consent) | channels |
+| GET | `/api/v1/voice/calls` | Call log for an RFQ (or the whole tenant) | channels |
+| GET | `/api/v1/voice/calls/{call_id}` | Call console: transcript, policy turns and extraction | channels |
+| GET | `/api/v1/voice/features` | Which voice features are enabled for this tenant | channels |
 | GET | `/health` | Liveness probe | system |
 | GET | `/metrics` | Prometheus-format metrics (minimal) | system |
 | GET | `/ready` | Readiness probe (checks the database) | system |

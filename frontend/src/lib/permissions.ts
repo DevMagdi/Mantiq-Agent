@@ -36,6 +36,13 @@ export const PERM = {
   costWrite: "cost:write",
   auditPackageRead: "audit_package:read",
   auditPackageReview: "audit_package:review",
+  // channels & voice (phase 3)
+  channelRead: "channel:read",
+  channelWrite: "channel:write",
+  inboxRead: "inbox:read",
+  inboxReply: "inbox:reply",
+  assistantUse: "assistant:use",
+  voiceCall: "voice:call",
   // reporting & admin
   reportRead: "report:read",
   settingsRead: "settings:read",

@@ -257,7 +257,11 @@ async def send_reminders(session: AsyncSession, tenant: Tenant, *, now: datetime
             select(RFQSupplier).where(RFQSupplier.rfq_id == rfq.id,
                                       RFQSupplier.status.in_(["invited", "sent", "reminded"]))
         )).scalars().all())
-        template = await pick_template(session, tenant, "reminder", "email", "ar")
+        from app.services import channels as channel_service
+
+        rfq_lines = list((await session.execute(
+            select(RFQLine).where(RFQLine.rfq_id == rfq.id).order_by(RFQLine.line_no)
+        )).scalars().all())
         for invitation in invitations:
             if invitation.reminder_count >= 2:
                 continue
@@ -265,18 +269,34 @@ async def send_reminders(session: AsyncSession, tenant: Tenant, *, now: datetime
             if last and (now - last) < timedelta(days=2):
                 continue
             supplier = (await session.execute(select(Supplier).where(Supplier.id == invitation.supplier_id))).scalar_one()
+            # A reminder follows the channel the supplier actually answers on — WhatsApp first.
+            resolved = await channel_service.resolve(session, tenant, supplier, invitation=invitation,
+                                                     rfq=rfq)
+            channel = resolved["channel"] if resolved["available"] else "email"
+            template = await pick_template(session, tenant, "reminder",
+                                           channel if channel != "web_form" else "email",
+                                           supplier.preferred_language or "ar")
             link = await create_web_form_link(session, tenant, rfq, supplier.id)
-            context = {"supplier_name": supplier.name, "rfq_code": rfq.code,
+            context = {"supplier_name": supplier.name, "supplier_name_ar": supplier.name_ar or supplier.name,
+                       "rfq_code": rfq.code, "title": rfq.title,
+                       "quantity_summary": quantity_summary(rfq_lines),
                        "deadline": rfq.deadline.strftime("%Y-%m-%d") if rfq.deadline else "",
-                       "web_form_url": link, "tenant_name": tenant.name}
+                       "web_form_url": link, "tenant_name": tenant.name,
+                       "payment_terms": rfq.payment_terms,
+                       "delivery_location": rfq.delivery_location or "Buyer premises",
+                       "incoterm": rfq.incoterm}
             subject = render_template(template.subject if template else f"Reminder: RFQ {rfq.code}", context)
             body = render_template(template.body if template else f"Reminder for {rfq.code}: {link}", context)
             outcome = await send_message(session, tenant, rfq=rfq, supplier=supplier, subject=subject,
-                                         body=body, body_ar=body, channel="email", author_type="system")
+                                         body=body, body_ar=body, channel=channel, author_type="system",
+                                         template_code="reminder" if channel == "whatsapp" else "",
+                                         locale=supplier.preferred_language or "ar")
             if outcome.get("ok"):
                 invitation.reminder_count += 1
                 invitation.last_reminder_at = now
                 invitation.status = "reminded"
+                invitation.channel = channel
+                invitation.comm_status = "sent"
                 sent += 1
     await session.flush()
     return {"reminders_sent": sent, "rfqs_closed": closed}
