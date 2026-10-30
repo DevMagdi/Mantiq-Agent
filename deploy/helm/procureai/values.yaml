@@ -1,0 +1,72 @@
+global:
+  imagePullSecrets: []
+  env: production
+  publicAppUrl: https://app.procureai.mantiq.tech
+
+image:
+  registry: ghcr.io/mantiq
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  port: 8000
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+worker:
+  replicaCount: 2
+  concurrency: 4
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+beat:
+  enabled: true
+
+web:
+  replicaCount: 2
+  port: 80
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 256Mi}
+
+ingress:
+  enabled: true
+  className: nginx
+  host: app.procureai.mantiq.tech
+  tlsSecret: procureai-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+
+# Secrets are referenced, never templated: create them with `kubectl create secret` or an
+# external secret operator. Required keys: SECRET_KEY, ENCRYPTION_MASTER_KEY, DATABASE_URL.
+existingSecret: procureai-secrets
+
+config:
+  APP_ENV: production
+  API_PREFIX: /api/v1
+  RATE_LIMIT_ENABLED: "true"
+  REDIS_URL: redis://procureai-redis:6379/0
+  LLM_PROVIDER: anthropic
+  LLM_MODEL: claude-sonnet-4-5
+  EMAIL_PROVIDER: smtp
+  WHATSAPP_PROVIDER: cloud_api
+  TELEPHONY_PROVIDER: twilio
+  SEARCH_PROVIDER: serpapi
+  PAYMENT_PROVIDER: stripe
+  ERP_PROVIDER: odoo
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  TENANT_RLS_ENABLED: "true"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "procureai.labels" . | nindent 4 }}
+data:
+  PUBLIC_APP_URL: {{ .Values.global.publicAppUrl | quote }}
+  PUBLIC_BASE_URL: {{ .Values.global.publicAppUrl | quote }}
+{{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+{{- end }}
