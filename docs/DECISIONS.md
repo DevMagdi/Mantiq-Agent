@@ -132,3 +132,12 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     preference, not a tenant setting); collapsed keeps 40px targets and `aria-label`s, a hairline per
     group and the gold active rail drawn with a logical `start-0` pseudo-element so RTL mirrors for
     free.
+
+## Test determinism
+
+41. **The suite never reads the wall clock for contact hours.** `CONTACT_HOURS_START/END` are tenant
+    settings (default 07:00–21:00, the real business rule) and `tests/conftest.py` widens them to
+    00:00–23:59 for the session. Before this, `tests/test_api_flow.py` passed in the morning and
+    failed after 21:00 Cairo because dispatch was legitimately blocked. The hours rule itself is
+    still asserted with an explicit `now` in `tests/test_policy_engine.py` and
+    `tests/test_services_negotiation.py`.

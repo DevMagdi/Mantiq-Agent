@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # --- misc ---
     public_app_url: str = "http://localhost:5173"
     default_timezone: str = "Africa/Cairo"
+    # Outbound supplier contact window, local to the tenant timezone. The policy engine blocks
+    # autonomous sends outside it; tests widen it so the suite never depends on the wall clock.
+    contact_hours_start: int = 7
+    contact_hours_end: int = 21
     sentry_dsn: str = ""
     otel_enabled: bool = False
 
