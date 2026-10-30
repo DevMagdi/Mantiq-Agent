@@ -20,14 +20,40 @@ from app.core.rate_limit import check as rate_check
 from app.db.session import SessionLocal, engine
 from app.services.bootstrap import bootstrap
 from app.services.migrations import run_migrations
+from app.services.seed import seed_demo_tenant
 
 configure_logging()
 log = logging.getLogger("procureai.main")
 
 
 @asynccontextmanager
+def _assert_supported_database() -> None:
+    """PostgreSQL 16 is the supported database.
+
+    SQLite is kept for the test suite and for sandboxes that have no PostgreSQL server. Anywhere
+    else it is a hard error rather than a silent downgrade: RLS, pg_trgm search and pgvector
+    similarity silently stop protecting data on SQLite.
+    """
+    url = settings.database_url
+    if not url.startswith("sqlite"):
+        return
+    if settings.app_env == "test" or settings.allow_sqlite_fallback:
+        log.warning(
+            "running on SQLite (%s); this is a development fallback — RLS, full-text search and "
+            "vector ranking are PostgreSQL-only", settings.app_env,
+        )
+        return
+    raise RuntimeError(
+        "SQLite is not a supported database for APP_ENV="
+        f"{settings.app_env!r}. Point DATABASE_URL at PostgreSQL 16 "
+        "(postgresql+asyncpg://user:password@host:5432/procureai). For a sandbox without "
+        "PostgreSQL, set ALLOW_SQLITE_FALLBACK=true and accept the reduced guarantees."
+    )
+
+
 async def lifespan(app: FastAPI):
     log.info("starting ProcureAI api env=%s", settings.app_env)
+    _assert_supported_database()
     try:
         await run_migrations()
     except Exception:  # pragma: no cover - migration tooling optional in tests
@@ -38,6 +64,17 @@ async def lifespan(app: FastAPI):
                 await bootstrap(session)
         except Exception:  # pragma: no cover - bootstrap must not crash dev servers
             log.exception("bootstrap failed at startup")
+    if settings.demo_seed_on_start and not settings.is_prod:
+        # Idempotent (`seed_demo` records `demo_seeded` on the tenant), and never in production.
+        try:
+            async with SessionLocal() as session:
+                result = await seed_demo_tenant(
+                    session, demo_password=settings.bootstrap_demo_password
+                )
+                await session.commit()
+            log.info("demo data ready: %s", result)
+        except Exception:  # pragma: no cover - demo data must not crash dev servers
+            log.exception("demo seed failed at startup")
     yield
     await engine.dispose()
     log.info("shutdown complete")

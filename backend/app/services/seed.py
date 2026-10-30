@@ -148,6 +148,19 @@ async def _seed_delivery(session: AsyncSession, tenant: Tenant, po, users: dict[
                                     decision="confirm")
     await session.flush()
 
+async def seed_demo_tenant(
+    session: AsyncSession, slug: str = "nile", *, demo_password: str = "Demo!Pilot2026"
+) -> dict:
+    """Seed reference data and the demo dataset for one tenant (used by the CLI and startup)."""
+    from app.services.bootstrap import ensure_tenant, seed_reference_data
+
+    await seed_reference_data(session)
+    tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
+    if tenant is None:
+        tenant = await ensure_tenant(session, name="Nile Manufacturing Group", slug=slug)
+    return await seed_demo(session, tenant, demo_password=demo_password)
+
+
 async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str = "Demo!Pilot2026") -> dict:
     if (tenant.settings or {}).get("demo_seeded"):
         return {"skipped": True, "reason": "demo data already seeded"}

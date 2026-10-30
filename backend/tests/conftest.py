@@ -14,7 +14,12 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="procureai-tests-"))
 os.environ.update({
     "APP_ENV": "test",
+    # The suite runs on the SQLite fallback: it is the only server-less backend available in CI.
+    # PostgreSQL-specific guarantees (RLS, pg_trgm, pgvector) are covered by the `postgres` job in
+    # .github/workflows/ci.yml, which runs the same migrations against a real PostgreSQL 16.
     "DATABASE_URL": f"sqlite+aiosqlite:///{_TMP / 'test.db'}",
+    "ALLOW_SQLITE_FALLBACK": "true",
+    "DEMO_SEED_ON_START": "false",
     "LLM_PROVIDER": "fake",
     "SECRET_KEY": "test-secret-key-not-for-production-0123456789abcdef",
     "BOOTSTRAP_ON_START": "false",

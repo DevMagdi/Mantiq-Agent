@@ -1,7 +1,7 @@
 """post-PO lifecycle: goods receipts, supplier invoices and the supplier ledger
 
 Revision ID: 0013_post_po_lifecycle
-Revises: 0012_bootstrap_seed_reference_data
+Revises: 0012_bootstrap_reference_data
 Create Date: 2026-10-30 00:00:00
 
 Delivery and settlement happen after the award, so these tables are written only by a named
@@ -21,7 +21,7 @@ from sqlalchemy import Text
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0013_post_po_lifecycle"
-down_revision: str | None = "0012_bootstrap_seed_reference_data"
+down_revision: str | None = "0012_bootstrap_reference_data"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

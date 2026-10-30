@@ -12,12 +12,22 @@ from app.core.config import settings
 from app.db.base import Base
 
 _is_sqlite = settings.database_url.startswith("sqlite")
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    pool_pre_ping=True,
-    connect_args={"check_same_thread": False} if _is_sqlite else {},
-)
+
+# PostgreSQL gets a real pool; the SQLite fallback uses aiosqlite's own pool arguments.
+_ENGINE_ARGS: dict = {
+    "echo": False,
+    "pool_pre_ping": True,
+    "connect_args": {"check_same_thread": False} if _is_sqlite else {},
+}
+if not _is_sqlite:
+    _ENGINE_ARGS.update(
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        # Fail fast instead of hanging a request forever if the database stalls.
+        connect_args={"server_settings": {"statement_timeout": str(settings.db_statement_timeout_ms)}},
+    )
+engine = create_async_engine(settings.database_url, **_ENGINE_ARGS)
 
 if _is_sqlite:
     @event.listens_for(engine.sync_engine, "connect")
@@ -25,6 +35,10 @@ if _is_sqlite:
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
         cur.execute("PRAGMA journal_mode=WAL")
+        # The fallback is not the supported database; under a load test many writers collide,
+        # so wait for the write lock instead of failing immediately.
+        cur.execute("PRAGMA busy_timeout=15000")
+        cur.execute("PRAGMA synchronous=NORMAL")
         cur.close()
 
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
