@@ -7,6 +7,7 @@ export default {
       colors: {
         navy: {
           DEFAULT: "rgb(var(--navy-rgb) / <alpha-value>)",
+          950: "rgb(var(--navy-950-rgb) / <alpha-value>)",
           900: "rgb(var(--navy-900-rgb) / <alpha-value>)",
           800: "rgb(var(--navy-800-rgb) / <alpha-value>)",
           700: "rgb(var(--navy-700-rgb) / <alpha-value>)",
@@ -15,6 +16,7 @@ export default {
           DEFAULT: "rgb(var(--gold-rgb) / <alpha-value>)",
           600: "rgb(var(--gold-600-rgb) / <alpha-value>)",
           300: "rgb(var(--gold-300-rgb) / <alpha-value>)",
+          200: "rgb(var(--gold-200-rgb) / <alpha-value>)",
         },
         surface: {
           DEFAULT: "rgb(var(--surface-rgb) / <alpha-value>)",
@@ -28,6 +30,7 @@ export default {
           line: "rgb(var(--sidebar-line-rgb) / <alpha-value>)",
           ink: "rgb(var(--sidebar-ink-rgb) / <alpha-value>)",
           muted: "rgb(var(--sidebar-ink-muted-rgb) / <alpha-value>)",
+          label: "rgb(var(--sidebar-label-rgb) / <alpha-value>)",
         },
         line: {
           DEFAULT: "rgb(var(--line-rgb) / <alpha-value>)",
@@ -56,6 +59,7 @@ export default {
         card: "var(--shadow-card)",
         pop: "var(--shadow-pop)",
         focus: "0 0 0 3px var(--focus-ring)",
+        rail: "var(--shadow-rail)",
       },
       fontFamily: {
         sans: ["Inter", "IBM Plex Sans Arabic", "system-ui", "sans-serif"],
@@ -66,7 +70,8 @@ export default {
         "2xs": ["0.6875rem", { lineHeight: "1rem" }],
         "3xs": ["0.625rem", { lineHeight: "0.875rem" }],
       },
-      transitionTimingFunction: { out: "var(--ease-out)" },
+      transitionTimingFunction: { out: "var(--ease-out)", spring: "var(--ease-spring)" },
+      letterSpacing: { label: "var(--tracking-label)" },
       keyframes: {
         shimmer: { "0%": { opacity: "0.45" }, "50%": { opacity: "1" }, "100%": { opacity: "0.45" } },
         slideIn: { from: { transform: "translateY(6px)", opacity: "0" }, to: { transform: "none", opacity: "1" } },

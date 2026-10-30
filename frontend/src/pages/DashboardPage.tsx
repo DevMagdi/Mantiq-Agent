@@ -79,7 +79,7 @@ export default function DashboardPage() {
   const trend = data.price_trends ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeading title={t("dashboard.title")} subtitle={t("dashboard.subtitle")}>
         <p className="mt-1 text-2xs text-ink-subtle">
           {`${t("analytics.period")}: ${num(kpis.period_days, lang)} ${t("dashboard.days")}`}
@@ -105,7 +105,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
+        <Card accent className="xl:col-span-2">
           <CardHeader title={t("dashboard.spendTitle")} subtitle={t("analytics.spendByCategory")} action={<span className="text-xs text-ink-muted">{money(data.spend?.total, "EGP", lang)}</span>} />
           {spendRows.length === 0 ? (
             <EmptyState title={t("common.empty")} />

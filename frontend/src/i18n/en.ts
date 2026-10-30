@@ -24,6 +24,8 @@ const en: typeof ar = {
     settings: "Settings",
     audit: "Audit log",
     notifications: "Notifications",
+    workspace: "Workspace",
+    plan: "Plan",
   },
   common: {
     search: "Search",
@@ -144,6 +146,9 @@ const en: typeof ar = {
     subtitle: "Track every RFQ from dispatch to award",
     board: "Board",
     list: "List",
+    view: "View",
+    viewBoard: "Board view",
+    viewList: "List view",
     newRfq: "New RFQ",
     dispatch: "Dispatch to suppliers",
     preview: "Preview message",

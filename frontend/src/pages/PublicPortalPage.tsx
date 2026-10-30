@@ -79,7 +79,7 @@ export default function PublicPortalPage() {
                       key={category}
                       type="button"
                       aria-pressed={active}
-                      className={`chip ${active ? "border-gold bg-gold/15 text-[color:var(--gold-300)]" : "text-ink-muted"}`}
+                      className="chip"
                       onClick={() =>
                         setSelected((current) =>
                           current.includes(category) ? current.filter((item) => item !== category) : [...current, category],

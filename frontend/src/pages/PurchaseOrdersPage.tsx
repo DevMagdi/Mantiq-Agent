@@ -60,19 +60,14 @@ export default function PurchaseOrdersPage() {
         subtitle={t("purchaseOrders.subtitle")}
         eyebrow={t("nav.groups.fulfilment")}
         actions={
-          <div className="flex flex-wrap gap-1 rounded-lg border border-line bg-surface-alt p-1">
+          <div className="segmented" role="group" aria-label={t("common.status")}>
             {FILTERS.map((filter) => (
               <button
                 key={filter.value}
                 type="button"
                 onClick={() => setStatus(filter.value)}
                 aria-pressed={status === filter.value}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-2xs font-medium transition-colors",
-                  status === filter.value
-                    ? "bg-gold/15 text-[color:var(--gold-300)]"
-                    : "text-ink-muted hover:bg-surface-raised hover:text-ink",
-                )}
+                className="segmented-item"
               >
                 {t(filter.labelKey)}
               </button>
@@ -108,7 +103,7 @@ export default function PurchaseOrdersPage() {
           <EmptyState title={t("purchaseOrders.empty")} description={t("purchaseOrders.emptyHint")}
                       icon={<PackageCheck className="size-5" />} />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="table-scroll">
             <table className="table-dense">
               <thead>
                 <tr>
