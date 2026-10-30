@@ -88,7 +88,8 @@ async def create_rfq_from_pr(
         session.add(RFQLine(
             tenant_id=tenant.id, rfq_id=rfq.id, line_no=line.line_no, description=line.description,
             quantity=line.quantity, uom=line.uom, target_price=line.target_price,
-            specs=line.attributes or {}, pr_line_id=line.id,
+            # The taxonomy code drives category pricing and the comparison grouping downstream.
+            taxonomy_code=line.taxonomy_code, specs=line.attributes or {}, pr_line_id=line.id,
         ))
     for supplier_id in supplier_ids:
         session.add(RFQSupplier(tenant_id=tenant.id, rfq_id=rfq.id, supplier_id=supplier_id,

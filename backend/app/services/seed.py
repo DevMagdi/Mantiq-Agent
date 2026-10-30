@@ -15,6 +15,7 @@ from app.db.models.entities import (
     ApprovalChain,
     BenchmarkPrice,
     Comment,
+    GoodsReceipt,
     Offer,
     OfferLine,
     Plant,
@@ -23,9 +24,11 @@ from app.db.models.entities import (
     RFQSupplier,
     Supplier,
     SupplierCertification,
+    SupplierInvoice,
     Tenant,
     User,
 )
+from app.services import invoicing, receiving
 from app.services.catalog_data import CATEGORIES, DEMO_PLANTS, DEMO_SUPPLIERS
 from app.services.intake import create_pr
 from app.services.negotiation import upsert_policy
@@ -85,6 +88,66 @@ def _make_price_history(session: AsyncSession, tenant: Tenant, item_key: str, ba
         ))
 
 
+
+async def _seed_delivery(session: AsyncSession, tenant: Tenant, po, users: dict[str, User]) -> None:
+    """Walk the demo PO through one short delivery, an invoice and a partial payment.
+
+    The story a demo user sees: half the steel arrived first, was confirmed by the requester and
+    invoiced; a partial payment settled 40% of that invoice; the balance then arrived and the PO
+    is waiting to be closed.
+    """
+    lines = receiving.po_lines(po)
+    await receiving.mark_in_transit(session, tenant, po, actor_id=users["buyer"].id,
+                                    carrier="Nile Logistics", expected_at=datetime.now(UTC) + timedelta(days=3))
+    first = [{"line_no": row["line_no"],
+              "received_qty": str(row["quantity"] * Decimal("0.6") if index == 0 else row["quantity"]),
+              "accepted_qty": str(row["quantity"] * Decimal("0.6") if index == 0 else row["quantity"]),
+              "condition": "ok"}
+             for index, row in enumerate(lines)]
+    receipt = await receiving.create_receipt(
+        session, tenant, po, lines=first, received_by=users["buyer"].id,
+        delivery_note_ref="DN-88421", carrier="Nile Logistics", warehouse="Alexandria central stores",
+        notes="First delivery; steel arrived in two trucks.",
+        received_at=datetime.now(UTC) - timedelta(days=4),
+    )
+    receipt_row = await session.get(GoodsReceipt, receipt["receipt_id"])
+    await receiving.confirm_receipt(session, tenant, receipt_row, confirmed_by=users["requester"].id,
+                                    checks={"quantity_ok": True, "quality_ok": True, "spec_ok": True},
+                                    comment="Rebar and film match the specification.",
+                                    decision="confirm")
+    invoice_line_rows = []
+    for index, row in enumerate(lines):
+        quantity = Decimal(row["quantity"]) * Decimal("0.6") if index == 0 else Decimal(row["quantity"])
+        invoice_line_rows.append({"line_no": row["line_no"], "description": row["description"],
+                                  "uom": row["uom"], "quantity": str(quantity),
+                                  "unit_price": str(row["unit_price"])})
+    invoice = await invoicing.create_invoice(
+        session, tenant, po, number=f"INV-{po.code.split('-')[-1]}", lines=invoice_line_rows,
+        received_by=users["finance_approver"].id, currency=po.currency, tax_amount="0",
+        invoice_date=datetime.now(UTC) - timedelta(days=3), due_date=datetime.now(UTC) + timedelta(days=27),
+        notes="Delivered quantity only; balance to be invoiced on the second delivery.",
+    )
+    invoice_row = await session.get(SupplierInvoice, invoice["invoice_id"])
+    await invoicing.approve_invoice(session, tenant, invoice_row, approved_by=users["finance_approver"].id,
+                                    comment="Matched against the confirmed receipt.")
+    await invoicing.record_payment(session, tenant, invoice_row, amount=str(invoice_row.total * Decimal("0.4")),
+                                   method="bank_transfer", reference="CIB-TRF-90211",
+                                   actor_id=users["finance_approver"].id, note="First instalment")
+    remaining = [{"line_no": row["line_no"], "received_qty": str(Decimal(row["quantity"]) * Decimal("0.4")),
+                  "accepted_qty": str(Decimal(row["quantity"]) * Decimal("0.4"))}
+                 for index, row in enumerate(lines) if index == 0]
+    second = await receiving.create_receipt(session, tenant, po, lines=remaining,
+                                            received_by=users["buyer"].id,
+                                            delivery_note_ref="DN-88510", carrier="Nile Logistics",
+                                            warehouse="Alexandria central stores",
+                                            received_at=datetime.now(UTC) - timedelta(days=1))
+    second_row = await session.get(GoodsReceipt, second["receipt_id"])
+    await receiving.confirm_receipt(session, tenant, second_row, confirmed_by=users["requester"].id,
+                                    checks={"quantity_ok": True, "quality_ok": True, "spec_ok": True},
+                                    comment="Balance of the steel received; weights verified.",
+                                    decision="confirm")
+    await session.flush()
+
 async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str = "Demo!Pilot2026") -> dict:
     if (tenant.settings or {}).get("demo_seeded"):
         return {"skipped": True, "reason": "demo data already seeded"}
@@ -104,6 +167,7 @@ async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str
         ("buyer@nile.example.com", "Omar Khaled", "عمر خالد", "buyer"),
         ("requester@nile.example.com", "Mariam Adel", "مريم عادل", "requester"),
         ("finance@nile.example.com", "Tarek Nabil", "طارق نبيل", "finance_approver"),
+        ("storekeeper@nile.example.com", "Youssef Samir", "يوسف سمير", "warehouse"),
     ]:
         user = (await session.execute(
             select(User).where(User.tenant_id == tenant.id, User.email == email)
@@ -208,10 +272,11 @@ async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str
         {"stage": "replied", "at": (datetime.now(UTC) - timedelta(days=17)).isoformat(), "actor": "system"},
         {"stage": "closed", "at": (datetime.now(UTC) - timedelta(days=11)).isoformat(), "actor": "buyer"},
     ]
-    await create_po_for_offer(session, tenant, rfq1, best, created_by=users["buyer"].id)
+    po1 = await create_po_for_offer(session, tenant, rfq1, best, created_by=users["buyer"].id)
     session.add(Comment(tenant_id=tenant.id, rfq_id=rfq1.id, author_id=users["buyer"].id,
                         author_name="Omar Khaled", body="Approved and PO issued to the lowest TCO offer.",
                         mentions=[]))
+    await _seed_delivery(session, tenant, po1, users)
 
     # ------------------------------------------------ historical RFQ 2 (closed, lubricants)
     pr2 = await create_pr(session, tenant, lines=[

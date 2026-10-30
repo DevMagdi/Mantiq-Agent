@@ -1,7 +1,7 @@
 """SQLAlchemy 2 models for the full ProcureAI domain (SRS 7.1 + supporting tables)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -67,8 +67,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     totp_secret: Mapped[str] = mapped_column(String(64), default="")
     backup_codes: Mapped[list] = mapped_column(JSONVariant, default=list)
     locale: Mapped[str] = mapped_column(String(8), default="ar")
-    theme: Mapped[str] = mapped_column(String(12), default="dark")
-    numerals: Mapped[str] = mapped_column(String(12), default="western")
     preferred_currency: Mapped[str] = mapped_column(String(3), default="EGP")
     phone: Mapped[str] = mapped_column(String(40), default="")
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -695,11 +693,82 @@ class PurchaseOrder(Base, UUIDMixin, AuditMixin, TenantMixin):
     offer_id: Mapped[str | None] = mapped_column(String(36))
     amount: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
     currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    # delivery lifecycle: issued -> in_transit -> partially_received -> received -> confirmed -> closed
     status: Mapped[str] = mapped_column(String(20), default="issued")
     issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     lines: Mapped[list] = mapped_column(JSONVariant, default=list)
     document_html: Mapped[str] = mapped_column(Text, default="")
     erp_status: Mapped[str] = mapped_column(String(24), default="not_exported")
+
+
+# =====================================================================  post-PO lifecycle
+# Delivery and settlement live *after* the award. Every row here is created by a named human
+# action (warehouse, requester, finance); no agent tool can write to these tables.
+class GoodsReceipt(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """Physical receipt of a PO at the warehouse, then confirmed by the requesting team."""
+
+    __tablename__ = "goods_receipt"
+    code: Mapped[str] = mapped_column(String(40), index=True)  # GR-YYYY-NNNNN
+    po_id: Mapped[str] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), index=True)
+    delivery_note_ref: Mapped[str] = mapped_column(String(80), default="")
+    carrier: Mapped[str] = mapped_column(String(120), default="")
+    warehouse: Mapped[str] = mapped_column(String(120), default="")
+    # received -> confirmed | rejected (the requester is the only one who can move it out of received)
+    status: Mapped[str] = mapped_column(String(24), default="received")
+    received_by: Mapped[str | None] = mapped_column(String(36))
+    received_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    lines: Mapped[list] = mapped_column(JSONVariant, default=list)
+    discrepancy: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    confirmed_by: Mapped[str | None] = mapped_column(String(36))
+    confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    confirmation_checks: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    confirmation_comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class SupplierInvoice(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """A supplier invoice, matched 3-way against the PO and the confirmed receipts."""
+
+    __tablename__ = "supplier_invoice"
+    __table_args__ = (UniqueConstraint("tenant_id", "number", name="uq_supplier_invoice_number"),)
+    po_id: Mapped[str] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), index=True)
+    number: Mapped[str] = mapped_column(String(60), index=True)
+    invoice_date: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    due_date: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    subtotal: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    tax_amount: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    total: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    # received -> matched | mismatched -> approved -> partially_paid | paid (or disputed)
+    status: Mapped[str] = mapped_column(String(24), default="received")
+    lines: Mapped[list] = mapped_column(JSONVariant, default=list)
+    match_result: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    payment_suggestion: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    approved_by: Mapped[str | None] = mapped_column(String(36))
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    paid_amount: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class SupplierLedgerEntry(Base, UUIDMixin, TimestampMixin):
+    """Double-entry-lite ledger: an invoice debits the supplier (we owe), a payment credits it."""
+
+    __tablename__ = "supplier_ledger_entry"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str] = mapped_column(String(36), index=True)
+    po_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(24))  # invoice | payment | credit_note | adjustment
+    entry_date: Mapped[datetime] = mapped_column(UTCDateTime, default=lambda: datetime.now(UTC))
+    amount: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))  # +owed, -settled
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    method: Mapped[str] = mapped_column(String(40), default="")
+    reference: Mapped[str] = mapped_column(String(120), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str | None] = mapped_column(String(36))
 
 
 # =====================================================================  agents & audit
@@ -986,7 +1055,8 @@ ALL_MODELS = [
     ChannelMessage, Attachment, ExtractionResult, ExtractedField, VoiceCall, OptInRegistry, FxRate,
     LandedCostComponent, Offer, OfferLine, PriceHistory, BenchmarkPrice, NegotiationPolicy,
     NegotiationRound, NegotiationMessage, ApprovalChain, ApprovalStep, Approval, PurchaseOrder,
-    AgentRun, AgentStep, ToolCall, AuditLog, Notification, Comment, SavedView, Plan, Subscription,
+    GoodsReceipt, SupplierInvoice, SupplierLedgerEntry, AgentRun, AgentStep, ToolCall, AuditLog,
+    Notification, Comment, SavedView, Plan, Subscription,
     UsageEvent, Invoice, LlmProviderConfig, IntegrationConfig, IdempotencyKey, OutboxEvent,
     RetentionPolicy, DataErasureRequest, DiscoveryJob, DiscoveryCandidate, SupplierPortalToken,
     CountryCallPolicy,
@@ -1006,6 +1076,9 @@ _COMPOSITE_INDEXES = [
     ("ix_audit_tenant_created", AuditLog, ["tenant_id", "created_at"]),
     ("ix_usage_tenant_kind_occurred", UsageEvent, ["tenant_id", "kind", "occurred_at"]),
     ("ix_notification_user_unread", Notification, ["user_id", "read_at"]),
+    ("ix_goods_receipt_po_received", GoodsReceipt, ["po_id", "received_at"]),
+    ("ix_supplier_invoice_po_status", SupplierInvoice, ["po_id", "status"]),
+    ("ix_ledger_supplier_entry", SupplierLedgerEntry, ["tenant_id", "supplier_id", "entry_date"]),
 ]
 for _name, _model, _columns in _COMPOSITE_INDEXES:
     Index(_name, *[_model.__table__.c[col] for col in _columns])

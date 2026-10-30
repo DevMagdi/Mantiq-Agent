@@ -23,7 +23,6 @@ from app.db.models.entities import (
     MessageTemplate,
     NegotiationMessage,
     Offer,
-    PurchaseOrder,
     PurchaseRequisition,
     RFQLine,
     RFQSupplier,
@@ -43,7 +42,6 @@ from app.services.extraction import (
     verify_field,
 )
 from app.services.messaging import render_template, send_message
-from app.services.po import export_to_erp, po_excel, po_pdf
 from app.services.rfq import (
     append_stage,
     close_rfq,
@@ -863,73 +861,6 @@ async def escalate(ctx: Context = Depends(require("approval:decide"))):
     count = await escalate_overdue(ctx.session, ctx.tenant)
     await ctx.session.commit()
     return {"escalated": count}
-
-
-# ------------------------------------------------------------------ purchase orders
-@router.get("/purchase-orders", summary="List purchase orders")
-async def list_pos(ctx: Context = Depends(require("po:create"))):
-    rows = list((await ctx.session.execute(
-        select(PurchaseOrder).where(PurchaseOrder.tenant_id == ctx.tenant_id)
-        .order_by(PurchaseOrder.created_at.desc())
-    )).scalars().all())
-    return {"items": [{"id": po.id, "code": po.code, "rfq_id": po.rfq_id, "supplier_id": po.supplier_id,
-                       "amount": str(po.amount), "currency": po.currency, "status": po.status,
-                       "issued_at": po.issued_at, "erp_status": po.erp_status,
-                       "lines": len(po.lines or [])} for po in rows]}
-
-
-@router.get("/purchase-orders/{po_id}", summary="Purchase order detail")
-async def get_po(po_id: str, ctx: Context = Depends(require("po:create"))):
-    po = (await ctx.session.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == po_id, PurchaseOrder.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
-    if not po:
-        raise NotFound("Purchase order not found.")
-    supplier = (await ctx.session.execute(select(Supplier).where(Supplier.id == po.supplier_id))).scalar_one_or_none()
-    rfq = (await ctx.session.execute(select(RFQ).where(RFQ.id == po.rfq_id))).scalar_one_or_none()
-    return {"id": po.id, "code": po.code, "amount": str(po.amount), "currency": po.currency,
-            "status": po.status, "issued_at": po.issued_at, "lines": po.lines, "erp_status": po.erp_status,
-            "supplier": {"id": supplier.id, "name": supplier.name} if supplier else None,
-            "rfq": {"id": rfq.id, "code": rfq.code, "title": rfq.title} if rfq else None,
-            "document_html": po.document_html}
-
-
-@router.get("/purchase-orders/{po_id}/pdf", summary="Download the PO as PDF")
-async def po_pdf_endpoint(po_id: str, ctx: Context = Depends(require("po:export"))):
-    po = (await ctx.session.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == po_id, PurchaseOrder.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
-    if not po:
-        raise NotFound("Purchase order not found.")
-    data = po_pdf(po.document_html, po)
-    return Response(content=data, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{po.code}.pdf"'})
-
-
-@router.get("/purchase-orders/{po_id}/excel", summary="Download the PO as Excel")
-async def po_excel_endpoint(po_id: str, ctx: Context = Depends(require("po:export"))):
-    po = (await ctx.session.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == po_id, PurchaseOrder.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
-    if not po:
-        raise NotFound("Purchase order not found.")
-    return Response(content=po_excel(po), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": f'attachment; filename="{po.code}.xlsx"'})
-
-
-@router.post("/purchase-orders/{po_id}/export-erp", summary="Push the PO to the ERP connector")
-async def po_export_erp(po_id: str, ctx: Context = Depends(require("po:export"))):
-    po = (await ctx.session.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == po_id, PurchaseOrder.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
-    if not po:
-        raise NotFound("Purchase order not found.")
-    result = await export_to_erp(ctx.session, ctx.tenant, po)
-    await audit(ctx.session, tenant_id=ctx.tenant_id, action="po.exported", actor_id=ctx.user_id,
-                actor_label=ctx.user.email, entity_type="purchase_order", entity_id=po.id,
-                after=result, ip=ctx.ip, request_id=ctx.request_id)
-    await ctx.session.commit()
-    return result
 
 
 # ------------------------------------------------------------------ voice

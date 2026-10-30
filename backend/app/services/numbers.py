@@ -95,6 +95,14 @@ def parse_decimal(value: object) -> Decimal | None:
     if isinstance(value, float):
         return Decimal(str(value))
     raw = normalize_digits(str(value)).replace("\u00a0", " ").replace("\u066c", "").replace("\u066b", ".")
+    # Exponent notation ("5E+2") is produced by Decimal.normalize(); read it before tokenising so a
+    # stored quantity never silently degrades to its mantissa.
+    exponent = re.fullmatch(r"\s*([-+]?\d+(?:\.\d+)?)[eE]([-+]?\d+)\s*", raw)
+    if exponent:
+        try:
+            return Decimal(exponent.group(1)) * (Decimal(10) ** int(exponent.group(2)))
+        except InvalidOperation:
+            return None
     match = re.search(r"[-+]?\d[\d., ]*", raw)
     if not match:
         return None
@@ -115,6 +123,15 @@ def parse_decimal(value: object) -> Decimal | None:
         return Decimal(token)
     except InvalidOperation:
         return None
+
+
+def plain(value: Decimal | int | float | str | None) -> str:
+    """Serialise a decimal without exponent notation, for JSON payloads that humans read."""
+    num = parse_decimal(value)
+    if num is None:
+        return "0"
+    text = format(num.normalize(), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def parse_percent(value: object) -> Decimal | None:

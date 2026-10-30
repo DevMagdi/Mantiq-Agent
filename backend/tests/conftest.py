@@ -115,6 +115,13 @@ async def finance(client) -> dict:
 
 
 @pytest_asyncio.fixture
+async def warehouse(client) -> dict:
+    data = await _login(client, "storekeeper@nile.example.com")
+    return {"token": data["access_token"], "user": data["user"],
+            "headers": {"authorization": f"Bearer {data['access_token']}"}}
+
+
+@pytest_asyncio.fixture
 async def second_tenant() -> Tenant:
     """A second tenant used by isolation tests."""
     async with SessionLocal() as session:

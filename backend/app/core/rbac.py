@@ -15,6 +15,7 @@ ROLES: dict[str, dict[str, str]] = {
     "buyer": {"name": "Buyer", "name_ar": "مسؤول شراء"},
     "requester": {"name": "Plant / Department Requester", "name_ar": "طالب من المصنع أو القسم"},
     "finance_approver": {"name": "Finance Approver", "name_ar": "معتمد مالي"},
+    "warehouse": {"name": "Warehouse / Stores", "name_ar": "أمين المخزن"},
 }
 
 ALL_PERMISSIONS: dict[str, str] = {
@@ -46,7 +47,15 @@ ALL_PERMISSIONS: dict[str, str] = {
     "approval:decide": "Approve / reject / split award",
     "approval:delegate": "Delegate approvals",
     "po:create": "Create purchase orders",
+    "po:update": "Move a purchase order through delivery and close it",
     "po:export": "Export / push purchase orders",
+    "po:read": "View purchase orders, receipts and invoices",
+    "receipt:create": "Record the physical goods receipt at the warehouse",
+    "receipt:confirm": "Confirm received items match the original need",
+    "invoice:create": "Record a supplier invoice against a purchase order",
+    "invoice:approve": "Approve a three-way matched invoice for payment",
+    "payment:record": "Record a payment that was executed outside the platform",
+    "ledger:read": "View supplier balances and the payment ledger",
     "report:read": "View analytics and reports",
     "comment:create": "Comment and mention colleagues",
     "audit:read": "View audit trail and agent activity",
@@ -67,6 +76,8 @@ ALL_PERMISSIONS: dict[str, str] = {
 READ_ONLY_REQUESTER = {
     "pr:read", "pr:create", "pr:update", "rfq:read", "supplier:read", "offer:read",
     "comparison:read", "comment:create", "report:read", "settings:read",
+    # The requesting team signs off on what the warehouse physically received.
+    "po:read", "receipt:confirm",
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
@@ -78,20 +89,25 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "supplier:import", "supplier:discovery", "supplier:approve", "offer:read", "offer:verify",
         "negotiation:read", "negotiation:policy", "negotiation:draft", "negotiation:send",
         "negotiation:auto", "comparison:read", "approval:read", "approval:decide",
-        "approval:delegate", "po:create", "po:export", "report:read", "comment:create",
-        "audit:read", "admin:templates", "settings:read",
+        "approval:delegate", "po:create", "po:update", "po:read", "po:export",
+        "receipt:create", "receipt:confirm", "invoice:create", "invoice:approve", "ledger:read",
+        "report:read", "comment:create", "audit:read", "admin:templates", "settings:read",
     },
     "buyer": {
         "pr:read", "pr:create", "pr:update", "pr:verify", "rfq:read", "rfq:create", "rfq:update",
         "rfq:send", "supplier:read", "supplier:create", "supplier:update", "supplier:discovery",
         "offer:read", "offer:verify", "negotiation:read", "negotiation:draft", "negotiation:send",
-        "comparison:read", "approval:read", "po:create", "report:read", "comment:create",
-        "settings:read",
+        "comparison:read", "approval:read", "po:create", "po:read", "invoice:create",
+        "ledger:read", "report:read", "comment:create", "settings:read",
     },
     "requester": READ_ONLY_REQUESTER,
     "finance_approver": {
         "pr:read", "rfq:read", "offer:read", "comparison:read", "approval:read", "approval:decide",
-        "approval:delegate", "report:read", "comment:create", "audit:read", "settings:read",
+        "approval:delegate", "po:read", "supplier:read", "invoice:create", "invoice:approve",
+        "payment:record", "ledger:read", "report:read", "comment:create", "audit:read", "settings:read",
+    },
+    "warehouse": {
+        "po:read", "receipt:create", "supplier:read", "comment:create", "report:read", "settings:read",
     },
 }
 

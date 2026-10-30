@@ -45,6 +45,18 @@ def test_tool_registry_is_closed_and_forbidden_verbs_absent():
     assert catalog["propose_counter"]["requires_policy"] is True
 
 
+def test_post_award_human_actions_have_no_agent_tool():
+    """Receiving, matching, approving and paying are human verbs — the agent must not be able to reach them."""
+    catalog = {item["name"] for item in tool_catalog()}
+    post_award_verbs = {
+        "record_payment", "approve_invoice", "pay_invoice", "execute_payment",
+        "create_invoice", "confirm_receipt", "accept_delivery", "close_po",
+    }
+    assert not (post_award_verbs & catalog), f"agent gained a payment/receipt tool: {post_award_verbs & catalog}"
+    assert not (post_award_verbs & set(TOOLS))
+    assert {"accept_offer", "sign_contract", "pay_invoice"} <= FORBIDDEN_TOOL_NAMES
+
+
 def test_graph_stages_declare_their_human_checkpoints():
     assert STAGES[0] == "intake" and STAGES[-1] == "approval"
     assert HUMAN_INTERRUPTS == {"await_replies", "verify", "approval"}
