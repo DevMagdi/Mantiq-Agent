@@ -155,6 +155,25 @@ Full lifecycle (intake → dispatch → reply → extract → compare → policy
 is exercised end-to-end by `tests/test_api_flow.py` and `tests/test_api_rfq_lifecycle.py` against the
 real app with a real migrated database.
 
+### CI on this branch — all five jobs green
+
+Run [`41098250455`](https://github.com/DevMagdi/Mantiq-Agent/actions/runs/41098250455) at `61ce98c`:
+
+| Job | Result | Duration |
+| --- | --- | --- |
+| Backend (lint, migrate, tests, coverage) | pass | 1m 12s |
+| Frontend (typecheck, lint, tests, build) | pass | 37s |
+| Container images build (api, worker, web) | pass | 1m 58s |
+| Helm chart lint (`helm lint` + `helm template`) | pass | 6s |
+| Secrets & dependency scan | pass | 29s |
+
+That first red run was useful: it exposed that the backend was **not installable** — setuptools
+flat-layout discovery aborted on multiple top-level packages, and `typer`, `cryptography`, `pyyaml`
+and `email-validator` were imported but undeclared. A warm local virtualenv had hidden all of it.
+Fixed in `fix(build)`, then verified from an empty virtualenv: `pip install -e ".[dev]"`,
+`procureai --help`, `alembic upgrade head`, `alembic check` and `pytest` all succeed on the newest
+resolved dependency versions (FastAPI 0.162, SQLAlchemy 2.1, pytest 9.2).
+
 ## 4. Safety-critical behaviour (with tests)
 
 | Guarantee | Proof |

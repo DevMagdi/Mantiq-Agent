@@ -58,6 +58,15 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Mobile app | Not in scope | The API is versioned and CORS-configured for a future client |
 | e-Invoicing / VAT submission | Country-specific compliance not in the SRS extract | Invoice model carries `lines`, `currency`, `status`; a submission adapter would slot in next to the payment adapter |
 
+## Infrastructure verified in CI
+
+All three images build (`docker build` in the container job), `helm lint` and `helm template` pass,
+`pip install -e ".[dev]"` works from an empty virtualenv, `alembic upgrade head` + `alembic check`
+are clean, and the whole test suite runs on GitHub-hosted runners (Actions run `41098250455`).
+The compose file itself is only YAML-validated locally — no Docker daemon ran it.
+What cannot be verified here is a live PostgreSQL/Redis/MinIO deployment — the compose stack is
+syntax-validated, not executed.
+
 ## Known rough edges
 
 1. `app/services/billing_helpers.py` still contains an older privacy implementation
