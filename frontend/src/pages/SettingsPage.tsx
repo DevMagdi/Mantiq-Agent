@@ -46,7 +46,9 @@ export default function SettingsPage() {
     { value: "apiKeys", label: t("settings.apiKeys"), permission: PERM.adminApiKeys },
     { value: "llm", label: t("settings.llm"), permission: PERM.adminLlm },
     { value: "billing", label: t("settings.billing"), permission: PERM.adminBilling },
-    { value: "retention", label: t("settings.retention"), permission: PERM.settingsRead },
+    // Editing retention is `settings:update`; a read-only role must not get a form whose save
+    // would be refused.
+    { value: "retention", label: t("settings.retention"), permission: PERM.settingsUpdate },
   ].filter((item) => can(item.permission));
 
   const [tab, setTab] = useState(tabs[0]?.value ?? "");
@@ -64,7 +66,7 @@ export default function SettingsPage() {
           {can(PERM.adminApiKeys) ? <TabPanel value="apiKeys"><ApiKeys lang={lang} /></TabPanel> : null}
           {can(PERM.adminLlm) ? <TabPanel value="llm"><LlmSettings lang={lang} /></TabPanel> : null}
           {can(PERM.adminBilling) ? <TabPanel value="billing"><Billing lang={lang} /></TabPanel> : null}
-          {can(PERM.settingsRead) ? <TabPanel value="retention"><Retention /></TabPanel> : null}
+          {can(PERM.settingsUpdate) ? <TabPanel value="retention"><Retention /></TabPanel> : null}
         </Tabs>
       )}
     </div>
@@ -590,7 +592,12 @@ function Retention() {
   const { t } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const retention = useQuery({ queryKey: ["retention"], queryFn: () => api.get<RetentionPayload>("/api/v1/retention") });
+  const { can } = useAuth();
+  const retention = useQuery({
+    queryKey: ["retention"],
+    queryFn: () => api.get<RetentionPayload>("/api/v1/retention"),
+    enabled: can(PERM.settingsUpdate),
+  });
   const [edits, setEdits] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
 

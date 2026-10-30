@@ -25,12 +25,28 @@
   h3 {
     @apply tracking-tight;
   }
+  /* Every interactive element gets the same 120 ms colour response, and only colour. */
+  a,
+  button {
+    transition:
+      color var(--motion-fast) var(--ease-out),
+      background-color var(--motion-fast) var(--ease-out),
+      border-color var(--motion-fast) var(--ease-out),
+      box-shadow var(--motion-fast) var(--ease-out);
+  }
 }
 
 @layer components {
   /* ---------------------------------------------------------------- surfaces */
   .card {
-    @apply rounded-xl border border-line bg-surface-alt shadow-card;
+    @apply relative rounded-xl border border-line bg-surface-alt shadow-card;
+    background-image: var(--grad-card);
+  }
+  /* A hairline of gold on the top edge: the single cue that a card is a deliberate container. */
+  .card-accent::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-4 top-0 h-px;
+    background: linear-gradient(90deg, transparent, var(--gold-line), transparent);
   }
   .card-header {
     @apply flex items-center justify-between gap-3 border-b border-line px-4 py-3;
@@ -45,18 +61,24 @@
 
   /* ---------------------------------------------------------------- controls */
   .btn {
-    @apply inline-flex select-none items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium
-      transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45;
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-md px-3 py-2 text-sm
+      font-medium disabled:cursor-not-allowed disabled:opacity-45;
   }
   .btn-sm {
     @apply px-2.5 py-1.5 text-xs;
   }
   .btn-primary {
-    @apply btn bg-gold text-[color:var(--gold-contrast)] shadow-1 hover:bg-[color:var(--gold-600)]
-      active:translate-y-px;
+    @apply btn text-[color:var(--gold-contrast)] shadow-1 active:translate-y-px;
+    background-image: var(--grad-gold);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.06);
   }
   .btn-secondary {
-    @apply btn border border-line bg-surface-raised text-ink hover:border-line-strong hover:bg-navy-700/60;
+    @apply btn border border-line bg-surface-raised text-ink hover:border-line-strong;
+  }
+  .btn-secondary:hover {
+    background-color: rgb(var(--navy-700-rgb) / 0.65);
   }
   .btn-ghost {
     @apply btn text-ink-muted hover:bg-surface-raised hover:text-ink;
@@ -67,13 +89,42 @@
   .input {
     @apply w-full rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink
       placeholder:text-ink-subtle focus:border-gold focus:outline-none focus:ring-2 focus:ring-[color:var(--focus-ring)];
+    box-shadow: 0 1px 0 var(--hairline) inset;
   }
   .label {
     @apply mb-1 block text-2xs font-semibold uppercase tracking-[0.1em] text-ink-muted;
   }
   .chip {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-line px-2 py-0.5
-      text-2xs font-medium;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-line px-2
+      py-0.5 text-2xs font-medium;
+    background-color: rgb(var(--surface-raised-rgb) / 0.4);
+  }
+  /* A chip that is also a toggle (categories, concessions) declares its state once, in HTML. */
+  .chip[aria-pressed="true"] {
+    border-color: rgb(var(--gold-rgb) / 0.55);
+    background-color: rgb(var(--gold-rgb) / 0.14);
+    color: var(--gold-200);
+  }
+
+  /* Segmented control: one housed track, one raised selected cell. Used for view and status
+     switches so every filter on every screen reads the same. */
+  .segmented {
+    @apply inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-line p-0.5;
+    background-color: rgb(var(--surface-alt-rgb) / 0.75);
+  }
+  .segmented-item {
+    @apply rounded-md px-2.5 py-1 text-2xs font-medium text-ink-muted transition-colors;
+  }
+  .segmented-item:hover {
+    @apply bg-surface-raised text-ink;
+  }
+  .segmented-item[aria-pressed="true"] {
+    background-color: rgb(var(--gold-rgb) / 0.16);
+    color: var(--gold-200);
+    box-shadow: inset 0 0 0 1px rgb(var(--gold-rgb) / 0.28);
+  }
+  .segmented-item:focus-visible {
+    outline-offset: 1px;
   }
 
   /* ---------------------------------------------------------------- tables */
@@ -81,8 +132,9 @@
     @apply w-full border-collapse text-sm;
   }
   .table-dense thead th {
-    @apply sticky top-0 z-10 border-b border-line bg-surface-alt/95 px-3 py-2 text-start text-2xs
-      font-semibold uppercase tracking-[0.1em] text-ink-muted backdrop-blur;
+    @apply sticky top-0 z-10 border-b border-line px-3 py-2 text-start text-2xs font-semibold
+      uppercase tracking-[0.1em] text-ink-muted backdrop-blur;
+    background-color: rgb(var(--surface-alt-rgb) / 0.94);
   }
   .table-dense tbody td {
     @apply border-b border-line/60 px-3 py-2 align-middle;
@@ -91,7 +143,8 @@
     @apply transition-colors duration-100;
   }
   .table-dense tbody tr:hover {
-    @apply bg-surface-raised/50;
+    background-color: rgb(var(--surface-raised-rgb) / 0.45);
+    box-shadow: inset 2px 0 0 var(--gold-line-soft);
   }
   .table-dense tbody tr:last-child td {
     @apply border-b-0;
@@ -101,32 +154,145 @@
     @apply animate-shimmer rounded bg-line/60;
   }
 
+  /* Page-level dense table shell: the header stays put while rows scroll inside the card. */
+  .table-scroll {
+    @apply max-h-[calc(100vh-19rem)] overflow-auto;
+  }
+  .table-dense tbody tr[data-selected="true"] {
+    background-color: rgb(var(--gold-rgb) / 0.09);
+    box-shadow: inset 2px 0 0 var(--gold);
+  }
+  .table-dense tbody tr[data-selected="true"]:hover {
+    background-color: rgb(var(--gold-rgb) / 0.13);
+  }
+  /* Sortable header affordance: quiet until hovered, then unmistakably a control. */
+  .table-dense thead th button {
+    @apply -mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors;
+  }
+  .table-dense thead th button:hover {
+    @apply text-ink;
+  }
+  .table-dense thead th button[data-active="true"] {
+    color: var(--gold-300);
+  }
+
   /* ---------------------------------------------------------------- sidebar */
+  /* The rail is the product's signature surface: a vertical gradient one step darker than the page,
+     a single hairline separating it from content, and gold used only for the active item. */
   .sidebar {
-    @apply flex flex-col border-e border-[color:var(--sidebar-line)] bg-[color:var(--sidebar)];
+    @apply relative flex flex-col border-e border-[color:var(--sidebar-line)];
+    background-color: var(--sidebar);
+    background-image: var(--grad-rail);
+  }
+  /* Inner light line on the rail's content edge — depth without a second border. */
+  .sidebar::after {
+    content: "";
+    @apply pointer-events-none absolute inset-y-0 end-0 w-px;
+    background: linear-gradient(180deg, var(--hairline), transparent 30%, transparent 70%, var(--hairline));
+  }
+
+  .sidebar-brand {
+    @apply relative flex h-header shrink-0 items-center gap-2 border-b border-[color:var(--sidebar-line)] px-4;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent);
+  }
+
+  .sidebar-group {
+    @apply pb-1.5;
   }
   .sidebar-group-label {
-    @apply px-3 pb-1 pt-4 text-[0.625rem] font-semibold uppercase tracking-[0.16em]
-      text-[color:var(--ink-subtle)];
+    @apply flex items-center gap-2 px-3 pb-1.5 pt-4 text-[0.625rem] font-semibold uppercase
+      text-[color:var(--sidebar-label)];
+    letter-spacing: 0.18em;
   }
+  /* The rule after a group label keeps four groups from reading as one long list. */
+  .sidebar-group-label::after {
+    content: "";
+    @apply h-px flex-1;
+    background: linear-gradient(90deg, var(--sidebar-line), transparent);
+  }
+  [dir="rtl"] .sidebar-group-label::after {
+    background: linear-gradient(270deg, var(--sidebar-line), transparent);
+  }
+
   .sidebar-link {
-    @apply relative flex items-center gap-2.5 rounded-md py-2 text-[0.8125rem] font-medium
-      text-[color:var(--sidebar-ink-muted)] transition-colors duration-150;
+    @apply relative flex items-center gap-3 rounded-md py-2 text-[0.8125rem] font-medium
+      text-[color:var(--sidebar-ink-muted)];
+    padding-inline: 0.625rem;
   }
   .sidebar-link:hover {
-    @apply bg-sidebar-raised/70 text-[color:var(--sidebar-ink)];
+    background-color: rgba(255, 255, 255, 0.035);
+    color: rgb(var(--sidebar-ink-rgb) / 1);
   }
+  .sidebar-link:hover .sidebar-icon {
+    color: rgb(var(--gold-300-rgb) / 0.85);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .sidebar-link:focus-visible {
+    outline-offset: -2px;
+  }
+
+  /* Active: gold wash that fades out, a 2px gold spine, and a gold icon. Nothing else changes —
+     no bold jump, no size change, so the list does not shift. */
   .sidebar-link-active {
-    @apply bg-gold/10 text-[color:var(--gold-300)];
+    @apply text-[color:var(--gold-200)];
+    background-image: var(--grad-gold-wash);
+    box-shadow: inset 0 0 0 1px var(--gold-line-soft);
   }
-  /* The gold rail is drawn with a pseudo-element so it mirrors automatically in RTL. */
   .sidebar-link-active::before {
     content: "";
-    @apply absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-gold;
+    @apply absolute inset-y-1.5 start-0 w-[2px] rounded-full;
+    background: linear-gradient(180deg, var(--gold-300), var(--gold-600));
+    box-shadow: 0 0 10px rgba(201, 162, 39, 0.55);
+  }
+  .sidebar-link-active .sidebar-icon {
+    color: var(--gold-300);
+    border-color: var(--gold-line-soft);
+    background-color: var(--gold-wash);
+  }
+
+  /* Icon sits in its own 26px frame so labels align down the whole rail. */
+  .sidebar-icon {
+    @apply flex size-[26px] shrink-0 items-center justify-center rounded-md border border-transparent
+      text-current transition-colors;
+  }
+
+  /* Collapsed rail: items become 44px squares and keep the gold spine. */
+  .sidebar-link-collapsed {
+    @apply mx-auto size-11 justify-center rounded-lg p-0;
+  }
+  .sidebar-link-collapsed .sidebar-icon {
+    @apply size-full border-transparent bg-transparent;
+  }
+  .sidebar-link-collapsed.sidebar-link-active::before {
+    @apply inset-y-2 start-[-6px];
+  }
+
+  .sidebar-divider {
+    @apply mx-3 my-2 h-px;
+    background: linear-gradient(90deg, transparent, var(--sidebar-line) 22%, var(--sidebar-line) 78%, transparent);
+  }
+
+  /* Workspace card at the foot of the rail. */
+  .sidebar-workspace {
+    @apply rounded-lg border border-[color:var(--sidebar-line)] px-3 py-2;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
   }
 
   /* ---------------------------------------------------------------- lifecycle */
   .stepper-dot {
     @apply flex size-7 items-center justify-center rounded-full border text-[0.6875rem] font-semibold;
+  }
+
+  /* ---------------------------------------------------------------- data viz */
+  .kpi-value {
+    @apply mt-2 text-2xl font-semibold tabular tracking-tight text-ink;
+  }
+  .kpi-card {
+    @apply card p-4 transition-[transform,box-shadow,border-color] duration-200;
+  }
+  .kpi-card:hover {
+    @apply border-line-strong;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-2), 0 12px 24px -20px rgba(0, 0, 0, 0.9);
   }
 }

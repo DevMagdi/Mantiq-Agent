@@ -50,12 +50,24 @@ export default function LoginPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Brand panel */}
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-[color:var(--navy-900)] p-10 text-white lg:flex">
+      <section className="relative hidden flex-col justify-between overflow-hidden border-e border-[color:var(--line)] bg-[color:var(--navy-900)] p-12 text-white lg:flex">
+        {/* Two soft gold pools + a faint engineering grid: depth without a photograph. */}
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.14]"
+          className="pointer-events-none absolute inset-0 opacity-[0.16]"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 20%, var(--gold) 0, transparent 42%), radial-gradient(circle at 82% 78%, var(--gold) 0, transparent 46%)",
+              "radial-gradient(circle at 16% 18%, var(--gold) 0, transparent 40%), radial-gradient(circle at 84% 82%, var(--gold) 0, transparent 44%)",
+          }}
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)",
+            backgroundSize: "56px 56px",
+            maskImage: "radial-gradient(ellipse at 30% 30%, black 0, transparent 72%)",
+            WebkitMaskImage: "radial-gradient(ellipse at 30% 30%, black 0, transparent 72%)",
           }}
           aria-hidden
         />
@@ -82,7 +94,7 @@ export default function LoginPage() {
       </section>
 
       {/* Form panel */}
-      <section className="flex items-center justify-center bg-surface px-5 py-12">
+      <section className="relative flex items-center justify-center bg-surface px-5 py-12">
         <div className="w-full max-w-sm">
           <div className="mb-8 lg:hidden">
             <Brand />

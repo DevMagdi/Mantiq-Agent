@@ -160,33 +160,35 @@ export default function AnalyticsPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader title={t("analytics.savingsByBuyer")} />
-          <table className="table-dense">
-            <thead>
-              <tr>
-                <th>{t("common.buyers")}</th>
-                <th className="text-end">{t("dashboard.kpis.offers")}</th>
-                <th className="text-end">{t("common.total")}</th>
-                <th className="text-end">{t("dashboard.kpis.savings")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(savings.data?.items ?? []).map((row) => (
-                <tr key={row.name}>
-                  <td className="text-sm">{row.name}</td>
-                  <td className="text-end tabular text-sm">{num(row.orders, lang)}</td>
-                  <td className="text-end tabular text-sm">{money(row.amount, "EGP", lang)}</td>
-                  <td className="text-end tabular text-sm text-[color:var(--ok-ink)]">{percent(Number(row.amount) > 0 ? 12.5 : 0)}</td>
-                </tr>
-              ))}
-              {(savings.data?.items ?? []).length === 0 ? (
+          <div className="table-scroll">
+            <table className="table-dense">
+              <thead>
                 <tr>
-                  <td colSpan={4}>
-                    <EmptyState title={t("common.empty")} />
-                  </td>
+                  <th>{t("common.buyers")}</th>
+                  <th className="text-end">{t("dashboard.kpis.offers")}</th>
+                  <th className="text-end">{t("common.total")}</th>
+                  <th className="text-end">{t("dashboard.kpis.savings")}</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(savings.data?.items ?? []).map((row) => (
+                  <tr key={row.name}>
+                    <td className="text-sm">{row.name}</td>
+                    <td className="text-end tabular text-sm">{num(row.orders, lang)}</td>
+                    <td className="text-end tabular text-sm">{money(row.amount, "EGP", lang)}</td>
+                    <td className="text-end tabular text-sm text-[color:var(--ok-ink)]">{percent(Number(row.amount) > 0 ? 12.5 : 0)}</td>
+                  </tr>
+                ))}
+                {(savings.data?.items ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>
+                      <EmptyState title={t("common.empty")} />
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </Card>
 
         <Card>

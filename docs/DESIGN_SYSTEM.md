@@ -20,28 +20,33 @@ opacity modifiers (`bg-surface-raised/60`) without losing the token.
 | Token | Hex | Use |
 | --- | --- | --- |
 | `--navy` / `--navy-800` | `#16283f` | brand base, logo plate |
-| `--navy-900` | `#0d1a2b` | deepest surface, login brand panel |
+| `--navy-950` | `#08121d` | deepest surface, rail base |
+| `--navy-900` | `#0d1a2b` | login brand panel, text on gold |
 | `--navy-700` | `#223b57` | hover on navy, chart neutral |
-| `--gold` | `#c9a227` | primary action, active nav rail, focus ring |
-| `--gold-600` | `#a8861d` | pressed gold |
-| `--gold-300` | `#e3c766` | gold text on navy (active nav, accents) |
+| `--gold` | `#c9a227` | primary action, active nav accent, focus ring |
+| `--gold-600` | `#a8861d` | pressed gold, spine gradient end |
+| `--gold-300` | `#e3c766` | gold text on navy, active icons |
+| `--gold-200` | `#f2e3ae` | active nav label on its gold wash |
 | `--gold-contrast` | `#0d1a2b` | text on a gold fill (buttons, selection) |
-| `--surface` | `#0f1b2a` | app background |
-| `--surface-sunken` | `#0b1624` | shell backdrop behind the rail |
-| `--surface-alt` | `#142436` | cards, table headers |
-| `--surface-raised` | `#1a2c41` | drawers, popovers, inputs, hover rows |
-| `--line` | `#27384d` | borders, dividers |
-| `--line-strong` | `#33475f` | hover border |
+| `--surface` | `#0e1a28` | app background |
+| `--surface-sunken` | `#0a1522` | inset wells, table heads |
+| `--surface-alt` | `#132233` | secondary panels |
+| `--surface-raised` | `#182a3e` | cards, drawers, popovers, inputs, hover rows |
+| `--line` / `--line-strong` | `#24384d` / `#31465f` | borders, dividers / hover border |
 | `--ink` | `#eef2f7` | primary text |
 | `--ink-muted` | `#a9b7c7` | secondary text |
-| `--ink-subtle` | `#7a8a9d` | timestamps, hints |
-| `--sidebar` | `#0b1624` | navigation rail (one step darker than the page) |
-| `--sidebar-raised` | `#16283f` | rail footer plate, hover |
-| `--sidebar-ink` / `--sidebar-ink-muted` | `#e6ecf4` / `#93a4b8` | rail text, idle/hover |
-| `--ok` | `#1f7a4d` | approved, verified, matched, savings |
-| `--warn` | `#b7791f` | pending, partially received, low confidence |
-| `--danger` | `#b42318` | rejected, mismatch, overdue, breach |
-| `--info` | `#1d5f9f` | informational chips, in-transit |
+| `--ink-subtle` | `#8595a8` | timestamps, hints, labels |
+| `--sidebar` / `--sidebar-raised` | `#08121d` / `#16283f` | navigation rail / rail hover + active wash |
+| `--sidebar-line` | `#1b2c3f` | rail hairline |
+| `--sidebar-ink` / `--sidebar-ink-muted` / `--sidebar-label` | `#e8eef6` / `#93a4b8` / `#70849b` | rail text / idle items / group labels |
+| `--ok` / `--ok-ink` | `#1f7a4d` / `#4ec98c` | approved, verified, matched, savings |
+| `--warn` / `--warn-ink` | `#b7791f` / `#e8b25a` | pending, partially received, low confidence |
+| `--danger` / `--danger-ink` | `#b42318` / `#f2776b` | rejected, mismatch, overdue, breach |
+| `--info` / `--info-ink` | `#1d5f9f` / `#6fb0e8` | informational chips, in transit |
+
+There is no light-theme counterpart to any of these: the built CSS contains no `prefers-color-scheme`
+block and no `[data-theme]` selector, so a light variant cannot be reached at runtime. The exact
+values and the contrast matrix are asserted by `src/styles/tokens.test.ts`.
 
 Status→tone mapping is centralised in `StatusChip` / `Badge` (`src/components/ui.tsx`), so a new
 status cannot pick an arbitrary colour. The post-award statuses (`issued`, `in_transit`,
@@ -78,7 +83,7 @@ columns align across digits and locales.
 
 ## 4. Layout
 
-* Shell: 264px rail (`--sidebar-width`) collapsing to 72px (`--sidebar-width-collapsed`), 56px
+* Shell: 268px rail (`--sidebar-width`) collapsing to 76px (`--sidebar-width-collapsed`), 56px
   topbar (`--header-height`), content max-width 1440px with 24px gutters at `lg`.
 * The rail is collapsible and the choice persists in `localStorage` (`procureai.sidebar`). Collapsed
   it keeps 44px hit targets, shows icons only with a tooltip/`aria-label`, and separates groups with
@@ -133,9 +138,12 @@ pages that need it paginate through the API.
 ## 7. Accessibility (WCAG 2.1 AA target)
 
 * Contrast: body text ≥ 4.5:1, large text ≥ 3:1 against `--surface` / `--surface-alt` /
-  `--surface-raised`. Measured pairs: `--ink #eef2f7` on `#0f1b2a` 15.4:1, `--ink-muted #a9b7c7` on
-  `#142436` 7.7:1, `--ink-subtle #7a8a9d` on `#142436` 4.46:1, `--gold-300 #e3c766` on `#0b1624`
-  10.9:1, sidebar `--sidebar-ink-muted #93a4b8` on `#0b1624` 7.1:1.
+  `--surface-raised`. Measured ratios (surface / alt / raised): `--ink` 15.60 / 14.32 / 12.98,
+  `--ink-muted` 8.59 / 7.89 / 7.14, `--ink-subtle` 5.73 / 5.26 / 4.77, `--gold` 7.25 / 6.66 / 6.03,
+  `--gold-300` 10.55 / 9.68 / 8.77. Rail: `--sidebar-ink` 16.14, `--sidebar-ink-muted` 7.40,
+  `--sidebar-label` 4.90 (4.66 at the top of the rail gradient), active `--gold-200` on the raised
+  wash 11.62. These are enforced by `src/styles/tokens.test.ts`, which parses `tokens.css` and fails
+  below 4.5:1 — a colour tweak cannot silently regress the palette.
 * **Semantic colours are split into fill and ink.** The saturated `--ok/--warn/--danger/--info`
   values are 2.4–4.3:1 as text on the card surface, so they are only ever used as fills, borders and
   chart marks. Text uses `--ok-ink #4ec98c` (7.5:1), `--warn-ink #e8b25a` (8.2:1),

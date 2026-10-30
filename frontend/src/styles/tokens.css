@@ -11,6 +11,8 @@
      modifiers (e.g. bg-surface-raised/60). */
   --navy: #16283f;
   --navy-rgb: 22 40 63;
+  --navy-950: #08121d;
+  --navy-950-rgb: 8 18 29;
   --navy-900: #0d1a2b;
   --navy-900-rgb: 13 26 43;
   --navy-800: #16283f;
@@ -23,41 +25,60 @@
   --gold-600-rgb: 168 134 29;
   --gold-300: #e3c766;
   --gold-300-rgb: 227 199 102;
+  --gold-200: #f2e3ae;
+  --gold-200-rgb: 242 227 174;
 
   /* ---------------------------------------------------------------- surfaces */
-  /* page < panel < raised, so elevation reads as light rather than as a border. */
-  --surface: #0f1b2a;
-  --surface-rgb: 15 27 42;
-  --surface-sunken: #0b1624;
-  --surface-sunken-rgb: 11 22 36;
-  --surface-alt: #142436;
-  --surface-alt-rgb: 20 36 54;
-  --surface-raised: #1a2c41;
-  --surface-raised-rgb: 26 44 65;
-  --line: #27384d;
-  --line-rgb: 39 56 77;
-  --line-strong: #33475f;
-  --line-strong-rgb: 51 71 95;
+  /* page < panel < raised, so elevation reads as light rather than as a border.
+     The ladder is deliberately shallow (4–6% steps): at 50 rows on screen a strong step reads as
+     noise, a shallow one reads as material. */
+  --surface: #0e1a28;
+  --surface-rgb: 14 26 40;
+  --surface-sunken: #0a1522;
+  --surface-sunken-rgb: 10 21 34;
+  --surface-alt: #132233;
+  --surface-alt-rgb: 19 34 51;
+  --surface-raised: #182a3e;
+  --surface-raised-rgb: 24 42 62;
+  --line: #24384d;
+  --line-rgb: 36 56 77;
+  --line-strong: #31465f;
+  --line-strong-rgb: 49 70 95;
   --ink: #eef2f7;
   --ink-rgb: 238 242 247;
   --ink-muted: #a9b7c7;
   --ink-muted-rgb: 169 183 199;
-  --ink-subtle: #7a8a9d;
-  --ink-subtle-rgb: 122 138 157;
+  --ink-subtle: #8595a8;
+  --ink-subtle-rgb: 133 149 168;
   --gold-contrast: #0d1a2b;
+
+  /* Hairlines: a 1px inner light line is what makes a dark card feel machined rather than flat. */
+  --hairline: rgba(255, 255, 255, 0.05);
+  --hairline-strong: rgba(255, 255, 255, 0.085);
+  --edge-dark: rgba(0, 0, 0, 0.4);
+
+  /* ---------------------------------------------------------------- gold accents */
+  /* Gold is an accent, never a field: ≤ 6% of the screen. Weights are pre-mixed so opacity
+     modifiers are not needed for the common cases (and cannot drift). */
+  --gold-wash: rgba(201, 162, 39, 0.08);
+  --gold-wash-strong: rgba(201, 162, 39, 0.14);
+  --gold-line: rgba(201, 162, 39, 0.3);
+  --gold-line-soft: rgba(201, 162, 39, 0.16);
 
   /* ---------------------------------------------------------------- sidebar */
   /* The rail is one step darker than the page so the content area reads as the surface. */
-  --sidebar: #0b1624;
-  --sidebar-rgb: 11 22 36;
+  --sidebar: #08121d;
+  --sidebar-rgb: 8 18 29;
   --sidebar-raised: #16283f;
   --sidebar-raised-rgb: 22 40 63;
-  --sidebar-line: #1f3247;
-  --sidebar-line-rgb: 31 50 71;
-  --sidebar-ink: #e6ecf4;
-  --sidebar-ink-rgb: 230 236 244;
+  --sidebar-line: #1b2c3f;
+  --sidebar-line-rgb: 27 44 63;
+  --sidebar-ink: #e8eef6;
+  --sidebar-ink-rgb: 232 238 246;
   --sidebar-ink-muted: #93a4b8;
   --sidebar-ink-muted-rgb: 147 164 184;
+  --sidebar-label: #70849b;
+  --sidebar-label-rgb: 112 132 155;
 
   /* ---------------------------------------------------------------- semantic */
   /* Fills and bars use the saturated base; text uses the -ink variant, which is the same hue
@@ -84,26 +105,39 @@
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 16px;
-  --sidebar-width: 264px;
-  --sidebar-width-collapsed: 72px;
+  --sidebar-width: 268px;
+  --sidebar-width-collapsed: 76px;
   --header-height: 56px;
 
   /* ---------------------------------------------------------------- type */
+  /* Two weights do the hierarchy work: 600 for structure, 500 for controls; body stays 400. */
   --font-display: 600;
+  --tracking-label: 0.14em;
 
   /* ---------------------------------------------------------------- depth */
   /* Three steps only: resting card, raised control, floating overlay. */
-  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(6, 12, 20, 0.4);
-  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 6px 16px rgba(6, 12, 20, 0.35);
-  --shadow-3: 0 24px 48px -12px rgba(4, 9, 16, 0.65);
+  --shadow-1: 0 1px 0 var(--hairline) inset, 0 1px 2px rgba(4, 10, 17, 0.45);
+  --shadow-2: 0 1px 0 var(--hairline) inset, 0 10px 26px -18px rgba(3, 8, 14, 0.9);
+  --shadow-3: 0 32px 64px -28px rgba(2, 6, 11, 0.85), 0 2px 8px rgba(2, 6, 11, 0.4);
   --shadow-card: var(--shadow-2);
   --shadow-pop: var(--shadow-3);
-  --focus-ring: rgba(201, 162, 39, 0.45);
+  --shadow-rail: inset -1px 0 0 rgba(0, 0, 0, 0.45);
+  --shadow-inset-gold: inset 0 0 0 1px var(--gold-line-soft);
+  --focus-ring: rgba(201, 162, 39, 0.4);
+
+  /* ---------------------------------------------------------------- gradients */
+  /* Depth comes from a top-highlight gradient, not from more borders. */
+  --grad-rail: linear-gradient(180deg, #0b1826 0%, #08121d 46%, #091420 100%);
+  --grad-card: linear-gradient(180deg, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0) 46%);
+  --grad-header: linear-gradient(180deg, rgba(10, 21, 34, 0.94) 0%, rgba(10, 21, 34, 0.78) 100%);
+  --grad-gold: linear-gradient(180deg, #d6b233 0%, #c9a227 48%, #b08d1e 100%);
+  --grad-gold-wash: linear-gradient(90deg, rgba(201, 162, 39, 0.14) 0%, rgba(201, 162, 39, 0.02) 72%, transparent 100%);
 
   /* ---------------------------------------------------------------- motion */
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 html {
@@ -163,6 +197,18 @@ input[inputmode="decimal"] {
 *::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--line-strong);
+}
+
+/* The rail scrolls rarely; when it does the track should disappear entirely. */
+.sidebar-scroll {
+  scrollbar-width: none;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .visually-hidden {

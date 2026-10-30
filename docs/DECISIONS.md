@@ -199,4 +199,27 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     `supplier_balance: null` for roles such as `warehouse`; the PO detail page renders without the
     balance card and the list never calls `/supplier-balances`. A warehouse user needs the order to
     record a receipt, not the supplier's financials.
-
+53. **One theme, enforced by the token file.** `tokens.css` declares only navy surfaces and a gold
+    accent and sets `color-scheme: dark`. There is no `data-theme`, no `.dark` variant and no
+    `prefers-color-scheme` media query anywhere in the built CSS, so a light theme cannot come back
+    through a component-level override: any colour that is not a token fails review.
+54. **Gold is an accent, never a surface.** Gold appears only as a 2 px active spine, a wash, a
+    hairline or a focused border. Primary buttons are the one exception (`--grad-gold` with
+    `--gold-contrast` text, 7.24:1), because a first-priority action must be the brightest thing on
+    a dense page.
+55. **Every rail label clears WCAG AA on both rail gradients.** `--sidebar-label` was `#66798f`
+    (4.21:1 on `--sidebar`, 4.0:1 on the active wash — technically AA-large-only at 10 px, i.e. a
+    fail). It is now `#70849b` = 4.90:1 on the rail and 4.66:1 at the top of the rail gradient. `--ink-subtle`
+    was likewise `#7b8b9e` (4.19:1 on a raised card) and is now `#8595a8` (4.77:1). Every ink/surface
+    pair is measured in `docs/DESIGN_SYSTEM.md` and asserted by `src/styles/tokens.test.ts`.
+56. **State is expressed once, in HTML.** Toggles are `<button aria-pressed>` styled by
+    `.chip[aria-pressed="true"]` / `.segmented-item[aria-pressed="true"]`, not by conditional class
+    strings. The selector is both the style and the test hook, and screen readers get the state for
+    free instead of from a class name.
+57. **`table-scroll` caps table height, not the page.** Long lists scroll inside the card with a
+    sticky header, so the rail and page heading stay put — the dense-table pattern used by
+    procurement back-offices rather than full-page scroll.
+58. **The HTML/API contract for clarifications is unchanged; only the UI enforces it.** The backend
+    keeps returning 422 when a request is submitted with open questions (`AC-*` unchanged), and the
+    detail page disables Submit, explains why with `aria-describedby`, and offers waive per question.
+    Adding a second, softer server rule would have hidden the guard the SRS asks for.

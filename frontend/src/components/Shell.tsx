@@ -11,7 +11,7 @@ import type { AppLang } from "@/i18n";
 import type { NotificationFeed } from "@/lib/types";
 import { Avatar, Badge, cn, EmptyState } from "./ui";
 import { Sidebar } from "./Sidebar";
-import { useSidebarCollapsed } from "@/lib/nav";
+import { NAV_GROUPS, useSidebarCollapsed } from "@/lib/nav";
 
 export function Shell() {
   const { t, i18n } = useTranslation();
@@ -24,6 +24,16 @@ export function Shell() {
   const { collapsed, toggle } = useSidebarCollapsed();
 
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
+
+  // Derived from the same nav model the rail renders, so the two can never disagree.
+  const context = (() => {
+    const item = NAV_GROUPS.flatMap((group) =>
+      group.items.map((entry) => ({ ...entry, group: t(group.labelKey) })),
+    )
+      .filter((entry) => (entry.to === "/" ? location.pathname === "/" : location.pathname.startsWith(entry.to)))
+      .sort((a, b) => b.to.length - a.to.length)[0];
+    return item ? { title: t(`nav.${item.key}`), group: item.group } : null;
+  })();
 
   const notifications = useQuery({
     queryKey: ["notifications"],
@@ -91,7 +101,10 @@ export function Shell() {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-header items-center gap-2 border-b border-line bg-surface/85 px-3 backdrop-blur-md lg:px-5">
+        <header
+          className="sticky top-0 z-20 flex h-header items-center gap-2 border-b border-line px-3 backdrop-blur-md lg:px-6"
+          style={{ backgroundImage: "var(--grad-header)" }}
+        >
           <button
             type="button"
             className="btn-ghost btn-sm lg:hidden"
@@ -101,16 +114,39 @@ export function Shell() {
             <Menu className="size-4" />
           </button>
 
+          {/* Where am I: group / screen. Cheap wayfinding in a dense app, no extra request. */}
+          <div className="hidden min-w-0 items-center gap-2 text-xs md:flex">
+            {context?.group ? (
+              <>
+                <span className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-subtle">
+                  {context.group}
+                </span>
+                <span className="text-ink-subtle/60" aria-hidden>
+                  /
+                </span>
+              </>
+            ) : null}
+            <span className="truncate font-medium text-ink">{context?.title ?? t("app.name")}</span>
+          </div>
+
           <div className="flex-1" />
 
           <span
             title={connected ? t("common.live") : t("common.polling")}
             className={cn(
-              "hidden items-center gap-1.5 text-3xs font-medium uppercase tracking-[0.14em] sm:flex",
-              connected ? "text-[color:var(--ok-ink)]" : "text-ink-subtle",
+              "hidden items-center gap-1.5 rounded-full border px-2 py-0.5 text-3xs font-semibold",
+              "uppercase tracking-[0.14em] sm:inline-flex",
+              connected
+                ? "border-[color:var(--ok)]/35 bg-[color:var(--ok)]/10 text-[color:var(--ok-ink)]"
+                : "border-line bg-surface-raised/60 text-ink-subtle",
             )}
           >
-            <span className={cn("size-1.5 rounded-full", connected ? "bg-[color:var(--ok)]" : "bg-line")} />
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                connected ? "bg-[color:var(--ok-ink)]" : "bg-ink-subtle",
+              )}
+            />
             {connected ? t("common.live") : t("common.polling")}
           </span>
 
@@ -177,8 +213,8 @@ export function Shell() {
             {lang === "ar" ? "EN" : "ع"}
           </button>
 
-          <div className="ms-1 flex items-center gap-2 border-s border-line ps-2">
-            <Avatar name={user?.full_name ?? "?"} />
+          <div className="ms-1 flex items-center gap-2.5 border-s border-line ps-3">
+            <Avatar name={user?.full_name ?? "?"} className="ring-1 ring-[color:var(--gold-line-soft)] ring-offset-2 ring-offset-[color:var(--surface)]" />
             <div className="hidden leading-tight sm:block">
               <p className="text-xs font-medium text-ink">
                 {lang === "ar" && user?.full_name_ar ? user.full_name_ar : user?.full_name}
@@ -188,7 +224,7 @@ export function Shell() {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4 lg:px-6 lg:py-6">
+        <main className="min-h-0 flex-1 overflow-y-auto px-3 py-5 lg:px-6 lg:py-7">
           <div className="mx-auto w-full max-w-[1440px]">
             <Outlet />
           </div>
@@ -212,11 +248,18 @@ export function PageHeading({
   eyebrow?: string;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3 border-b border-line/70 pb-4">
       <div className="min-w-0">
-        {eyebrow ? <p className="eyebrow mb-1">{eyebrow}</p> : null}
-        <h1 className="truncate text-[1.375rem] font-semibold leading-tight text-ink">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-ink-muted">{subtitle}</p> : null}
+        {eyebrow ? (
+          <p className="mb-1.5 flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.16em] text-gold/90">
+            <span className="h-px w-4 bg-[color:var(--gold-line)]" aria-hidden />
+            {eyebrow}
+          </p>
+        ) : null}
+        <h1 className="truncate text-[1.5rem] font-semibold leading-tight tracking-[-0.01em] text-ink">
+          {title}
+        </h1>
+        {subtitle ? <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-muted">{subtitle}</p> : null}
         {children}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

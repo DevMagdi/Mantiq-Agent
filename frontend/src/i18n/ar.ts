@@ -22,6 +22,8 @@ const ar = {
     settings: "الإعدادات",
     audit: "سجل التدقيق",
     notifications: "الإشعارات",
+    workspace: "مساحة العمل",
+    plan: "الخطة",
   },
   common: {
     search: "بحث",
@@ -142,6 +144,9 @@ const ar = {
     subtitle: "متابعة في مراحل موحّدة من الإرسال إلى الترسية",
     board: "لوحة المراحل",
     list: "قائمة",
+    view: "طريقة العرض",
+    viewBoard: "عرض كلوحة مراحل",
+    viewList: "عرض كقائمة",
     newRfq: "طلب عرض جديد",
     dispatch: "إرسال للموردين",
     preview: "معاينة الرسالة",

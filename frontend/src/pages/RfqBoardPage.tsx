@@ -100,12 +100,26 @@ export default function RfqBoardPage() {
         subtitle={t("rfqs.subtitle")}
         actions={
           <>
-            <div className="flex overflow-hidden rounded-md border border-line">
-              <button type="button" className={cn("px-2.5 py-1.5", view === "board" ? "bg-surface-raised text-gold" : "text-ink-muted")} onClick={() => setView("board")} aria-pressed={view === "board"}>
-                <LayoutGrid className="size-4" aria-hidden />
+            <div className="segmented" role="group" aria-label={t("rfqs.view")}>
+              <button
+                type="button"
+                className="segmented-item"
+                onClick={() => setView("board")}
+                aria-pressed={view === "board"}
+                aria-label={t("rfqs.viewBoard")}
+                title={t("rfqs.viewBoard")}
+              >
+                <LayoutGrid className="size-3.5" aria-hidden />
               </button>
-              <button type="button" className={cn("px-2.5 py-1.5", view === "list" ? "bg-surface-raised text-gold" : "text-ink-muted")} onClick={() => setView("list")} aria-pressed={view === "list"}>
-                <List className="size-4" aria-hidden />
+              <button
+                type="button"
+                className="segmented-item"
+                onClick={() => setView("list")}
+                aria-pressed={view === "list"}
+                aria-label={t("rfqs.viewList")}
+                title={t("rfqs.viewList")}
+              >
+                <List className="size-3.5" aria-hidden />
               </button>
             </div>
             <button type="button" className="btn-primary" onClick={() => setNewOpen(true)}>

@@ -42,7 +42,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full border border-line bg-surface-raised text-gold">
+      <div className="flex size-12 items-center justify-center rounded-full border border-line bg-surface-raised text-gold shadow-1">
         {icon ?? <Check className="size-5" aria-hidden />}
       </div>
       <div>
@@ -149,8 +149,17 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
 
 /* ------------------------------------------------------------------ layout */
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cn("card", className)}>{children}</section>;
+export function Card({
+  children,
+  className,
+  accent = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Draws a fading gold hairline along the top edge. Use for the one primary card on a screen. */
+  accent?: boolean;
+}) {
+  return <section className={cn("card", accent && "card-accent", className)}>{children}</section>;
 }
 
 export function CardHeader({
@@ -164,9 +173,9 @@ export function CardHeader({
 }) {
   return (
     <header className="card-header">
-      <div>
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
-        {subtitle ? <p className="mt-0.5 text-xs text-ink-muted">{subtitle}</p> : null}
+      <div className="min-w-0">
+        <h2 className="truncate text-[0.8125rem] font-semibold tracking-[0.01em] text-ink">{title}</h2>
+        {subtitle ? <p className="mt-0.5 truncate text-2xs text-ink-muted">{subtitle}</p> : null}
       </div>
       {action}
     </header>
@@ -187,13 +196,17 @@ export function Kpi({
   icon?: ReactNode;
 }) {
   return (
-    <div className="card p-4">
+    <div className="kpi-card">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">{label}</p>
-        {icon ? <span className="text-gold">{icon}</span> : null}
+        <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-ink-subtle">{label}</p>
+        {icon ? (
+          <span className="flex size-7 items-center justify-center rounded-md border border-[color:var(--gold-line-soft)] bg-[color:var(--gold-wash)] text-gold">
+            {icon}
+          </span>
+        ) : null}
       </div>
-      <p className="mt-2 text-2xl font-semibold tabular text-ink">{value}</p>
-      <div className="mt-1 flex items-center gap-2 text-xs">
+      <p className="kpi-value">{value}</p>
+      <div className="mt-1.5 flex items-center gap-2 text-xs">
         {trend ? (
           <span className={trend.value >= 0 ? "text-[color:var(--ok-ink)]" : "text-[color:var(--danger-ink)]"}>
             {trend.value >= 0 ? "▲" : "▼"} {Math.abs(trend.value).toFixed(1)}%
@@ -225,7 +238,7 @@ export function Avatar({ name, className }: { name: string; className?: string }
   return (
     <span
       className={cn(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-gold/40 bg-gold/15 text-xs font-semibold text-[color:var(--gold-300)]",
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-gold/45 bg-gold/15 text-xs font-semibold text-[color:var(--gold-300)] shadow-1",
         className,
       )}
       aria-hidden
@@ -295,8 +308,10 @@ export function TabList({ items, className }: { items: { value: string; label: s
           key={item.value}
           value={item.value}
           className={cn(
-            "rounded-md px-3 py-1.5 text-sm text-ink-muted transition-colors",
-            "hover:text-ink data-[state=active]:bg-surface-raised data-[state=active]:text-gold",
+            "relative rounded-md px-3 py-1.5 text-[0.8125rem] font-medium text-ink-muted transition-colors",
+            "hover:bg-surface-raised/60 hover:text-ink",
+            "data-[state=active]:bg-surface-raised data-[state=active]:text-gold",
+            "data-[state=active]:shadow-[inset_0_0_0_1px_var(--gold-line-soft)]",
           )}
         >
           {item.label}

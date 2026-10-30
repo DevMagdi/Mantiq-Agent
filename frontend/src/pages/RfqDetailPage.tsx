@@ -644,7 +644,7 @@ function NegotiationPanel({ rfq, offers, onDone }: { rfq: RFQDetail; offers: Com
                   <button
                     key={concession}
                     type="button"
-                    className={cn("chip", active ? "border-gold bg-gold/15 text-[color:var(--gold-300)]" : "text-ink-muted")}
+                    className="chip"
                     aria-pressed={active}
                     onClick={() =>
                       setForm((prev) => ({
