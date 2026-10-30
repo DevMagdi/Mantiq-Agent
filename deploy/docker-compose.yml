@@ -1,0 +1,121 @@
+# ProcureAI — single-node production-like stack.
+#   cp .env.example .env && docker compose up -d --build
+#   docker compose exec api procureai bootstrap --demo
+name: procureai
+
+x-api-env: &api-env
+  APP_ENV: ${APP_ENV:-dev}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/.env}
+  ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?set ENCRYPTION_MASTER_KEY in deploy/.env}
+  DATABASE_URL: postgresql+asyncpg://procureai:${POSTGRES_PASSWORD:-change-me}@db:5432/procureai
+  REDIS_URL: redis://redis:6379/0
+  PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-fake}
+  WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-fake}
+  TELEPHONY_PROVIDER: ${TELEPHONY_PROVIDER:-fake}
+  SEARCH_PROVIDER: ${SEARCH_PROVIDER:-fake}
+  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-fake}
+  ERP_PROVIDER: ${ERP_PROVIDER:-file}
+  AWS_ENDPOINT: http://minio:9000
+  AWS_STORAGE_BUCKET: ${AWS_STORAGE_BUCKET:-procureai}
+  AWS_ACCESS_KEY: ${MINIO_ROOT_USER:-procureai}
+  AWS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-procureai-secret}
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: procureai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: procureai
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U procureai -d procureai"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-procureai}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-procureai-secret}
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    environment: *api-env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    environment: *api-env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+    environment: *api-env
+    depends_on:
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  redis-data:
+  minio-data:

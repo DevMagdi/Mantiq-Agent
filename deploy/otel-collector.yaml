@@ -1,0 +1,27 @@
+receivers:
+  otlp:
+    protocols:
+      grpc: {endpoint: 0.0.0.0:4317}
+      http: {endpoint: 0.0.0.0:4318}
+
+processors:
+  batch: {}
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+
+exporters:
+  debug:
+    verbosity: normal
+  # point this at Tempo/Jaeger/your APM in a real deployment
+  otlphttp/upstream:
+    endpoint: ${env:OTEL_UPSTREAM_ENDPOINT}
+    headers:
+      authorization: ${env:OTEL_UPSTREAM_TOKEN}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]

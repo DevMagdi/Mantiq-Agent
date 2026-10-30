@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.6
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/pyproject.toml /app/
+COPY backend/app /app/app
+COPY backend/migrations /app/migrations
+COPY backend/alembic.ini /app/alembic.ini
+RUN pip install --upgrade pip && pip install .
+
+RUN useradd --create-home --uid 10001 procureai && chown -R procureai:procureai /app
+USER procureai
+
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]

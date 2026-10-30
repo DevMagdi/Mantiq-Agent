@@ -1,0 +1,150 @@
+/* ProcureAI design tokens — Mantiq Technologies.
+   Navy/gold institutional palette, reused verbatim across light and dark themes.
+   Components must consume these variables (or the Tailwind aliases) and never hard-code hex. */
+:root {
+  /* Hex values are the source of truth; the *-rgb triples exist so Tailwind can
+     apply opacity modifiers (e.g. bg-surface-raised/60) while themes swap. */
+  --navy: #16283f;
+  --navy-rgb: 22 40 63;
+  --navy-900: #0d1a2b;
+  --navy-900-rgb: 13 26 43;
+  --navy-800: #16283f;
+  --navy-800-rgb: 22 40 63;
+  --navy-700: #223b57;
+  --navy-700-rgb: 34 59 87;
+  --gold: #c9a227;
+  --gold-rgb: 201 162 39;
+  --gold-600: #a8861d;
+  --gold-600-rgb: 168 134 29;
+  --gold-300: #e3c766;
+  --gold-300-rgb: 227 199 102;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --font-display: 600;
+  --shadow-card: 0 1px 2px rgba(13, 26, 43, 0.08), 0 8px 24px rgba(13, 26, 43, 0.06);
+  --shadow-pop: 0 12px 32px rgba(13, 26, 43, 0.18);
+  --focus-ring: rgba(201, 162, 39, 0.45);
+  --ok: #1f7a4d;
+  --ok-rgb: 31 122 77;
+  --warn: #b7791f;
+  --warn-rgb: 183 121 31;
+  --danger: #b42318;
+  --danger-rgb: 180 35 24;
+  --info: #1d5f9f;
+  --info-rgb: 29 95 159;
+}
+
+/* Dark is the default theme (Section 4 of the master build prompt). */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #0f1b2a;
+  --surface-rgb: 15 27 42;
+  --surface-alt: #142436;
+  --surface-alt-rgb: 20 36 54;
+  --surface-raised: #1a2c41;
+  --surface-raised-rgb: 26 44 65;
+  --line: #27384d;
+  --line-rgb: 39 56 77;
+  --ink: #eef2f7;
+  --ink-rgb: 238 242 247;
+  --ink-muted: #a9b7c7;
+  --ink-muted-rgb: 169 183 199;
+  --ink-subtle: #7a8a9d;
+  --ink-subtle-rgb: 122 138 157;
+  --gold-contrast: #0d1a2b;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --surface: #f6f7f9;
+  --surface-rgb: 246 247 249;
+  --surface-alt: #ffffff;
+  --surface-alt-rgb: 255 255 255;
+  --surface-raised: #ffffff;
+  --surface-raised-rgb: 255 255 255;
+  --line: #dde3ea;
+  --line-rgb: 221 227 234;
+  --ink: #16283f;
+  --ink-rgb: 22 40 63;
+  --ink-muted: #4c5c70;
+  --ink-muted-rgb: 76 92 112;
+  --ink-subtle: #6b7b8f;
+  --ink-subtle-rgb: 107 123 143;
+  --gold-contrast: #0d1a2b;
+  --shadow-card: 0 1px 2px rgba(13, 26, 43, 0.06), 0 6px 18px rgba(13, 26, 43, 0.05);
+}
+
+html {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+body {
+  font-family: Inter, "IBM Plex Sans Arabic", system-ui, sans-serif;
+  font-feature-settings: "tnum" 1, "cv05" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+[dir="rtl"] body {
+  font-family: "IBM Plex Sans Arabic", Inter, system-ui, sans-serif;
+}
+
+/* Numbers are always tabular so columns line up in both languages. */
+.tabular,
+table,
+input[inputmode="decimal"] {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--gold-contrast);
+}
+
+/* Thin, unobtrusive scrollbars that remain visible against both surfaces. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

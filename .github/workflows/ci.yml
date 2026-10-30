@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    name: Backend (lint, migrate, tests, coverage)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check app tests
+
+      - name: Migrations are consistent with the models
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+          SECRET_KEY: ci-secret-key-0123456789abcdef0123456789
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: Tests with coverage
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+          SECRET_KEY: ci-secret-key-0123456789abcdef0123456789
+          LLM_PROVIDER: fake
+          RATE_LIMIT_ENABLED: "false"
+        run: pytest tests -q --cov=app --cov-report=term-missing --cov-report=xml
+
+      - name: Enforce the coverage floor
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("coverage.xml").getroot()
+          rate = float(root.get("line-rate")) * 100
+          print(f"line coverage: {rate:.1f}%")
+          assert rate >= 80, f"coverage {rate:.1f}% is below the 80% floor"
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+
+  frontend:
+    name: Frontend (typecheck, lint, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - name: Typecheck (strict)
+        run: npm run typecheck
+      - name: Lint (zero warnings)
+        run: npm run lint
+      - name: Unit / component tests
+        run: npm run test
+      - name: Production build
+        run: npm run build
+
+  containers:
+    name: Container images build
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.api
+          push: false
+          tags: procureai/api:ci
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.worker
+          push: false
+          tags: procureai/worker:ci
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.web
+          push: false
+          tags: procureai/web:ci
+
+  chart:
+    name: Helm chart lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm/procureai
+      - run: helm template procureai deploy/helm/procureai --set existingSecret=ci-secrets > /dev/null
+
+  security:
+    name: Secrets & dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Block committed secrets
+        run: |
+          if git grep -nIE "(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|sk-[A-Za-z0-9]{20,})" -- . \
+             ':!docs/*' ':!frontend/package-lock.json' ':!backend/tests/*'; then
+            echo "::error::possible secret committed"; exit 1
+          fi
+
+      - name: Python dependencies audit (advisory)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip install ./backend
+          pip-audit || echo "::warning::pip-audit reported findings"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Node dependencies audit (advisory)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high || echo "::warning::npm audit reported findings"

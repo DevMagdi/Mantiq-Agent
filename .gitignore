@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------- secrets & local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ---------------------------------------------------------------- local data & artefacts
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+backend/var/
+var/storage/
+*.log
+
+# ---------------------------------------------------------------- node / frontend
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------- os noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ProcureAI">
+  <rect width="64" height="64" rx="14" fill="#16283f"/>
+  <path d="M32 9 51.5 20.5v23L32 55 12.5 43.5v-23Z" fill="none" stroke="#c9a227" stroke-width="3.2"/>
+  <path d="M32 20.5 41 26v11l-9 5.5-9-5.5V26Z" fill="#c9a227"/>
+</svg>
