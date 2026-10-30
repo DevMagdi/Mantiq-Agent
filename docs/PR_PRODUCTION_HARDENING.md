@@ -94,18 +94,32 @@ an `role="alert"` panel. Every call is `catch`ed through `errorMessage` — no u
 Covered by `frontend/src/pages/requests.test.tsx` (4 tests: blocked submit, enabled submit, waive
 payload, 422 surfaced).
 
-## 6. Load: 50 concurrent users, real PostgreSQL, measured
+## 6. Two more defects the load test and the clock found
+
+* **`GET /suppliers` returned 500 under load.** When a tenant's encrypted contacts cannot be
+  decrypted (master key rotated, or demo data seeded with a different secret), `get_dek` raised
+  `InvalidTag` straight through the endpoint. Decryption now fails closed — `CryptoError` →
+  empty PII, one error logged per tenant, ciphertext untouched — and the list still renders.
+  Pinned by `tests/test_crypto_resilience.py`.
+* **"All day" contact hours were `0..23`.** `time(start) <= now <= time(end)` still closed at 23:00
+  local, so the voice/negotiation tests failed only when CI ran after 23:00 Cairo. `end = 24` now
+  means end-of-day; web forms (not a contact window) use it too. Regression test:
+  `test_a_full_day_window_is_open_even_in_the_last_hour`.
+* **Commercial balances are withheld without `ledger:read`** (`supplier_balance: null`), and the PO
+  screens no longer call `/supplier-balances` for a warehouse user.
+
+## 7. Load: 50 concurrent users, real PostgreSQL, measured
 
 `scripts/load_test.py` — 50 independent sessions (one per demo persona), each with its own login,
 role-appropriate endpoint mix, 0.4–1.8 s think time, 10 s ramp, and a live WebSocket for the
 personas that hold one. Any 5xx, 429 or 403 fails the run.
 
 ```
-requests        2956  (41.3 req/s over 71.5s)
+requests        2928  (40.9 req/s over 71.6s)
 errors          0  (0.00 %)
-latency ms      p50 10 | p95 82 | p99 317 | max 711
-status          {'200': 2956}
-websockets      42/42 connected, 42 frames, 0 reconnects
+latency ms      p50 14 | p95 116 | p99 393 | max 1036
+status          {'200': 2928}
+websockets      42/42 connected, 168 frames, 0 reconnects
 logins          50 ok / 0 failed
   [PASS] p95 < 800 ms     [PASS] p99 < 2000 ms     [PASS] error rate < 1 %
   [PASS] websocket connects 100 %                 [PASS] no 5xx responses
@@ -123,7 +137,7 @@ $ ruff check app tests
 All checks passed!
 
 $ pytest tests -q --cov=app
-520 passed in 27.38s        TOTAL 8962 statements, 1332 missed, 85%
+524 passed in 33.20s        TOTAL 8975 statements, 1327 missed, 85%
 
 $ alembic current   (DATABASE_URL=postgresql+asyncpg://…@localhost:5432/procureai)
 0014_drop_theme_preference (head)
@@ -136,7 +150,7 @@ $ python scripts/load_test.py --users 50 --duration 60   → RESULT: PASS
 # frontend
 $ npx tsc --noEmit                    → clean
 $ npx eslint . --max-warnings 0       → clean
-$ npm run test                        → Test Files 6 passed, Tests 34 passed
+$ npm run test                        → Test Files 7 passed, Tests 35 passed
 $ npm run build                       → ✓ built in 6.18s
   dist/assets/index-B06tvgdr.js      399.85 kB │ gzip: 108.25 kB
   dist/assets/charts-1jBeNFw4.js     407.41 kB │ gzip: 110.02 kB
@@ -147,8 +161,9 @@ Migration chain executed on a real server this time: `0001 → 0014` (71 tables,
 
 ## Notes / decisions
 
-* `docs/DECISIONS.md` §42–§49 record the database policy, the two defect fixes, the revision-id
-  guard, the autogenerate filter, the CI PostgreSQL job and the load-test contract.
+* `docs/DECISIONS.md` §42–§52 record the database policy, the defect fixes, the revision-id guard,
+  the autogenerate filter, the CI PostgreSQL job, the load-test contract, the fail-closed PII rule,
+  the `0..24` contact window and the balance withholding.
 * `docs/PROGRESS.md` now separates what is *verified* from what still needs external
   infrastructure; the pgvector row was corrected to say the columns exist but no service computes
   embeddings yet.

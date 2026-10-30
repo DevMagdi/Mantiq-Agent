@@ -178,7 +178,12 @@ async def get_po(po_id: str, ctx: Context = Depends(require("po:read"))):
     receipts = await receiving.list_receipts(ctx.session, ctx.tenant_id, po.id)
     invoices = await invoicing.list_invoices(ctx.session, ctx.tenant_id, po.id)
     discrepancy = await receiving.discrepancy_summary(ctx.session, ctx.tenant_id, po)
-    balance = await invoicing.supplier_balance(ctx.session, ctx.tenant_id, po.supplier_id)
+    # Commercial balances are financial data: only ledger:read holders receive them.
+    balance = (
+        await invoicing.supplier_balance(ctx.session, ctx.tenant_id, po.supplier_id)
+        if "ledger:read" in ctx.permissions
+        else None
+    )
     return {
         **_po_summary(po),
         "amount": str(po.amount), "currency": po.currency,

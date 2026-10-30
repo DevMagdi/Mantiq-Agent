@@ -8,6 +8,7 @@ import { Card, EmptyState, ErrorState, Kpi, LoadingBlock, StatusChip, cn } from 
 import { api, errorMessage } from "@/lib/api";
 import { date, money, num } from "@/lib/format";
 import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import type { AppLang } from "@/i18n";
 import type { Page, PoStatus, PurchaseOrderSummary, SupplierBalanceRow } from "@/lib/types";
 
@@ -35,12 +36,13 @@ export default function PurchaseOrdersPage() {
       ),
   });
 
+  const canSeeBalances = can(PERM.ledgerRead);
   const balances = useQuery({
     queryKey: ["supplier-balances"],
     queryFn: () => api.get<{ items: SupplierBalanceRow[]; total_outstanding: string; total_overdue: string }>(
       "/api/v1/supplier-balances",
     ),
-    enabled: can("ledger:read"),
+    enabled: can(PERM.ledgerRead),
   });
 
   const items = useMemo(() => orders.data?.items ?? [], [orders.data]);
@@ -87,7 +89,7 @@ export default function PurchaseOrdersPage() {
           value={num(awaitingConfirmation.length, lang)}
           hint={t("purchaseOrders.receipts.pending")}
         />
-        {can("ledger:read") ? (
+        {canSeeBalances ? (
           <Kpi
             label={t("purchaseOrders.outstanding")}
             value={money(balances.data?.total_outstanding ?? "0", "EGP", lang)}

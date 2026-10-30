@@ -176,14 +176,18 @@ async def websocket_user(
             connected_once = True
             stats.ws_connected += 1
             while time.time() < stop_at:
+                # One heartbeat every 25 s, exactly like the SPA — not a hot loop. Broadcast frames
+                # (notification.created) can arrive at any time, so drain briefly then sleep.
                 # The browser client sends a bare `ping`; the server answers with a `pong` frame.
                 await socket.send("ping")
-                try:
-                    await asyncio.wait_for(socket.recv(), timeout=25)
-                    stats.ws_frames += 1
-                except asyncio.TimeoutError:
-                    stats.ws_errors.append(f"{email}: no frame within 25s")
-                    break
+                deadline = time.time() + 1.0
+                while time.time() < deadline:
+                    try:
+                        await asyncio.wait_for(socket.recv(), timeout=0.05)
+                        stats.ws_frames += 1
+                    except (asyncio.TimeoutError, TimeoutError):
+                        break
+                await asyncio.sleep(max(0.0, min(25.0, stop_at - time.time())))
     except Exception as exc:  # noqa: BLE001
         stats.ws_errors.append(f"{email}: {type(exc).__name__}: {exc}")
         if connected_once:

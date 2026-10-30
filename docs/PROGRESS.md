@@ -6,7 +6,7 @@ implemented, what is proven by a test, and what genuinely does not exist yet.
 Verification commands used for this snapshot (real output in `docs/PR_DESCRIPTION.md`):
 
 ```bash
-cd backend && pytest tests -q --cov=app        # 520 tests, 0 failures, 85% coverage
+cd backend && pytest tests -q --cov=app        # 524 tests, 0 failures, 85% coverage
 cd backend && ruff check app tests             # clean
 export DATABASE_URL=postgresql+asyncpg://procureai:change-me@localhost:5432/procureai
 cd backend && alembic upgrade head && alembic check     # on PostgreSQL 16, not SQLite
@@ -38,17 +38,17 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Analytics | KPIs, spend by category/supplier, savings by buyer, forecast, Excel export | `tests/test_services_analytics.py` |
 | Voice | disclosure-first calls, consent-gated recording, country hours, metering, manual script | `tests/test_services_voice.py` |
 | Agents | orchestration graph with human interrupts, 12 audited tools, forbidden verbs refused | `tests/test_agents_graph.py` |
-| Security | Argon2id, TOTP MFA, rotating refresh sessions, lockout, RBAC matrix | `tests/test_services_approval_auth.py`, `tests/test_api_identity.py` |
+| Security | Argon2id, TOTP MFA, rotating refresh sessions, lockout, RBAC matrix, PII decryption fails closed on a master-key mismatch | `tests/test_services_approval_auth.py`, `tests/test_api_identity.py`, `tests/test_crypto_resilience.py` |
 | Privacy | export bundle, erasure request workflow, redaction that keeps commercial records | `tests/test_services_privacy_portal.py` |
 | Billing | usage metering, invoice generation, usage export | `tests/test_services_award_discovery.py` |
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
 | Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar, every page wired to real endpoints, 34 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
-| RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403 | `frontend/src/components/guard.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
+| RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
 | PostgreSQL verification | Migration chain `0001→0014`, `alembic check`, 60 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6/6), CI job `postgres` |
-| Load | 50 concurrent role-based sessions (reads + WebSockets): 41.3 req/s, p95 82 ms, 0 errors | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
+| Load | 50 concurrent role-based sessions (reads + WebSockets): 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors; found and fixed a PII-decryption 500 and a hot-loop in the harness | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox

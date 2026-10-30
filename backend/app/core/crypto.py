@@ -20,6 +20,11 @@ from app.db.models.entities import Tenant
 log = logging.getLogger("procureai.crypto")
 
 _DEK_CACHE: dict[tuple[str, str], bytes] = {}
+_WARNED_TENANTS: set[str] = set()
+
+
+class CryptoError(RuntimeError):
+    """The master key cannot unwrap a stored DEK (secret rotated or key mismatch)."""
 
 
 def _master_key() -> bytes:
@@ -57,7 +62,14 @@ async def get_dek(session: AsyncSession, tenant: Tenant) -> tuple[bytes, str]:
         cache_key = (tenant.id, key_id)
         if cache_key in _DEK_CACHE:
             return _DEK_CACHE[cache_key], key_id
-        dek = _unwrap(wrapped)
+        try:
+            dek = _unwrap(wrapped)
+        except Exception as exc:  # noqa: BLE001 - any GCM/tag failure means "wrong master key"
+            raise CryptoError(
+                "ENCRYPTION_MASTER_KEY/SECRET_KEY does not match the key that wrapped this "
+                f"tenant's data key (key_id={key_id}). Restore the original secret to read the "
+                "encrypted supplier contacts."
+            ) from exc
         _DEK_CACHE[cache_key] = dek
         return dek, key_id
     dek = AESGCM.generate_key(bit_length=256)
@@ -82,7 +94,16 @@ async def encrypt_text(session: AsyncSession, tenant: Tenant, plaintext: str) ->
 async def decrypt_text(session: AsyncSession, tenant: Tenant, ciphertext: str, key_id: str) -> str:
     if not ciphertext:
         return ""
-    dek, current_id = await get_dek(session, tenant)
+    try:
+        dek, current_id = await get_dek(session, tenant)
+    except CryptoError:
+        # Fail closed, never 500: one unreadable contact must not take a whole screen down.
+        # The value stays encrypted in the database; only this read returns nothing.
+        if tenant.id not in _WARNED_TENANTS:
+            _WARNED_TENANTS.add(tenant.id)
+            log.error("cannot decrypt tenant %s PII: master key mismatch; values withheld",
+                      tenant.id)
+        return ""
     if key_id and key_id != current_id:
         log.warning("ciphertext encrypted with retired key %s (current %s)", key_id, current_id)
     data = _b64d(ciphertext)

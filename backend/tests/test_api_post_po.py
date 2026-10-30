@@ -205,6 +205,25 @@ async def test_supplier_balance_endpoints_are_consistent(client, manager, financ
     assert denied.status_code == 403
 
 
+async def test_commercial_balance_is_withheld_from_roles_without_the_ledger(client, manager,
+                                                                           warehouse, finance):
+    """A warehouse user may open the order but must not receive supplier financials."""
+    po = await _new_po(client, manager)
+    po_id = po["id"]
+
+    withheld = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=warehouse["headers"])
+    assert withheld.status_code == 200, withheld.text
+    assert withheld.json()["supplier_balance"] is None
+    # The operational payload is still complete for that role.
+    assert withheld.json()["receipts"] is not None
+    assert withheld.json()["timeline"]
+
+    visible = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=finance["headers"])
+    assert visible.status_code == 200, visible.text
+    assert visible.json()["supplier_balance"] is not None
+    assert "outstanding" in visible.json()["supplier_balance"]
+
+
 async def test_purchase_order_unknown_id_returns_404(client, manager):
     resp = await client.get("/api/v1/purchase-orders/00000000-0000-0000-0000-000000000000",
                             headers=manager["headers"])

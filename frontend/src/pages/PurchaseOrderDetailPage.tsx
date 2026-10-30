@@ -33,6 +33,7 @@ import {
 import { api, errorMessage } from "@/lib/api";
 import { date, dateTime, money, num } from "@/lib/format";
 import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import type { AppLang } from "@/i18n";
 import type {
   GoodsReceipt,
@@ -122,31 +123,31 @@ export default function PurchaseOrderDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusChip status={po.status} label={lang === "ar" ? po.status_label_ar : po.status_label} />
-            {can("po:update") && po.status === "issued" ? (
+            {can(PERM.poUpdate) && po.status === "issued" ? (
               <button type="button" className="btn-secondary btn-sm" onClick={() => ship.mutate()} disabled={ship.isPending}>
                 {ship.isPending ? <Spinner /> : <Ship className="size-3.5" aria-hidden />}
                 {t("purchaseOrders.actions.ship")}
               </button>
             ) : null}
-            {can("receipt:create") && po.status !== "closed" ? (
+            {can(PERM.receiptCreate) && po.status !== "closed" ? (
               <button type="button" className="btn-secondary btn-sm" onClick={() => setReceiptOpen(true)}>
                 <PackageCheck className="size-3.5" aria-hidden />
                 {t("purchaseOrders.actions.receive")}
               </button>
             ) : null}
-            {can("invoice:create") && po.status !== "closed" ? (
+            {can(PERM.invoiceCreate) && po.status !== "closed" ? (
               <button type="button" className="btn-secondary btn-sm" onClick={() => setInvoiceOpen(true)}>
                 <FileText className="size-3.5" aria-hidden />
                 {t("purchaseOrders.actions.invoice")}
               </button>
             ) : null}
-            {can("po:update") && po.can_close ? (
+            {can(PERM.poUpdate) && po.can_close ? (
               <button type="button" className="btn-primary btn-sm" onClick={() => close.mutate()} disabled={close.isPending}>
                 {close.isPending ? <Spinner /> : <CheckCircle2 className="size-3.5" aria-hidden />}
                 {t("purchaseOrders.actions.close")}
               </button>
             ) : null}
-            {can("po:export") ? (
+            {can(PERM.poExport) ? (
               <>
                 <button type="button" className="btn-ghost btn-sm"
                         onClick={() => void api.download(`/api/v1/purchase-orders/${po.id}/pdf`, `${po.code}.pdf`)}>
@@ -236,7 +237,7 @@ export default function PurchaseOrderDetailPage() {
                       <div className="flex items-center gap-2">
                         <StatusChip status={receipt.status} />
                         <span className="text-2xs text-ink-muted">{dateTime(receipt.received_at, lang)}</span>
-                        {receipt.status === "received" && can("receipt:confirm") ? (
+                        {receipt.status === "received" && can(PERM.receiptConfirm) ? (
                           <button type="button" className="btn-primary btn-sm" onClick={() => setConfirmTarget(receipt)}>
                             <ClipboardCheck className="size-3.5" aria-hidden />
                             {t("purchaseOrders.actions.confirm")}
@@ -274,8 +275,8 @@ export default function PurchaseOrderDetailPage() {
                     <InvoiceRow
                       invoice={invoice}
                       lang={lang}
-                      canApprove={can("invoice:approve")}
-                      canPay={can("payment:record")}
+                      canApprove={can(PERM.invoiceApprove)}
+                      canPay={can(PERM.paymentRecord)}
                       onApprove={() => setApproveTarget(invoice)}
                       onPay={() => setPayTarget(invoice)}
                       onRematch={() => rematch.mutate(invoice.id)}
@@ -290,6 +291,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         <div className="space-y-4">
+          {po.supplier_balance ? (
           <Card>
             <CardHeader title={t("purchaseOrders.balance.title")} subtitle={t("purchaseOrders.balance.derived")} />
             <div className="grid grid-cols-2 gap-3 p-4">
@@ -324,6 +326,7 @@ export default function PurchaseOrderDetailPage() {
               )}
             </div>
           </Card>
+          ) : null}
 
           <Card>
             <CardHeader title={t("purchaseOrders.lifecycle")} />

@@ -131,3 +131,20 @@ def test_drafting_stays_allowed_outside_hours_but_sending_does_not() -> None:
     decision = pe.evaluate_outgoing(DRAFT, POLICY, night)
     assert decision.allowed is True
     assert decision.action == "draft_ok"
+
+
+def test_a_full_day_window_is_open_even_in_the_last_hour() -> None:
+    """Regression: an "all day" window of 0..23 still closed at 23:00 local, so the suite failed
+    only when CI happened to run after 23:00 Cairo. 24 must mean end-of-day."""
+    from datetime import datetime
+
+    late = pe.PolicyContext(now=datetime(2026, 10, 29, 23, 45, tzinfo=UTC), timezone="Africa/Cairo",
+                            working_hours=(0, 24), send_requested=True)
+    assert pe.evaluate_outgoing(DRAFT, POLICY, late).allowed is True
+
+    # A real window is still enforced for the same clock.
+    night = pe.PolicyContext(now=datetime(2026, 10, 29, 23, 45, tzinfo=UTC), timezone="Africa/Cairo",
+                             working_hours=(8, 20), send_requested=True)
+    decision = pe.evaluate_outgoing(DRAFT, POLICY, night)
+    assert decision.allowed is False
+    assert pe.OUTSIDE_HOURS in decision.codes

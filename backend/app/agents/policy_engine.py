@@ -133,6 +133,9 @@ def _outside_working_hours(ctx: PolicyContext) -> bool:
         now = now.replace(tzinfo=ZoneInfo(ctx.timezone))
     local = now.astimezone(ZoneInfo(ctx.timezone))
     start, end = ctx.working_hours
+    if end >= 24:
+        # `end=24` is "end of day": an explicitly unrestricted window (web forms, test harnesses).
+        return False
     return not (time(start, 0) <= local.time() <= time(end, 0))
 
 

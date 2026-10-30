@@ -184,3 +184,19 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     `scripts/load_test.py --users 50` drives 50 independent sessions with per-role endpoint mixes,
     think time and live WebSockets, and fails on p95 > 800 ms, p99 > 2000 ms, any 5xx or any 403.
     Results and caveats are in `docs/LOAD_TEST.md`.
+50. **Encrypted PII fails closed, never 500s.** `get_dek` now raises `CryptoError` when the master
+    key cannot unwrap a tenant DEK (secret rotated or a different key was used to seed), and
+    `decrypt_text` catches it: the read returns nothing, one error is logged per tenant, and the
+    ciphertext stays untouched. Before this, one unreadable supplier contact turned
+    `GET /suppliers` into a 500 for the whole tenant — found by the 50-user load test.
+    `encrypt_text` still propagates the error, so nothing can silently re-key existing data.
+51. **"All day" contact hours are `0..24`, not `0..23`.** The policy engine compares
+    `time(start) <= now <= time(end)`, so a test window of `0..23` still closed at 23:00 local and
+    the voice/negotiation tests failed only when CI ran after 23:00 Cairo. `end = 24` now means
+    end-of-day (unrestricted) and is used by the test harness and by web forms, which are not a
+    contact window at all.
+52. **Commercial balances are withheld without `ledger:read`.** `GET /purchase-orders/{id}` returns
+    `supplier_balance: null` for roles such as `warehouse`; the PO detail page renders without the
+    balance card and the list never calls `/supplier-balances`. A warehouse user needs the order to
+    record a receipt, not the supplier's financials.
+
