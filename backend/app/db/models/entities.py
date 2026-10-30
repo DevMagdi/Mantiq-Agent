@@ -216,6 +216,10 @@ class Supplier(Base, UUIDMixin, AuditMixin, TenantMixin):
     flags: Mapped[list] = mapped_column(JSONVariant, default=list)
     # Self-service submissions from the supplier portal stay here until a buyer approves them.
     pending_profile: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    # Channel preferences for the Egyptian / Saudi market: WhatsApp first, then voice, then email.
+    preferred_channel: Mapped[str] = mapped_column(String(20), default="email")
+    secondary_channels: Mapped[list] = mapped_column(JSONVariant, default=list)
+    preferred_language: Mapped[str] = mapped_column(String(8), default="ar")
 
 
 class SupplierContact(Base, UUIDMixin, AuditMixin, TenantMixin):
@@ -355,6 +359,14 @@ class RFQSupplier(Base, UUIDMixin, AuditMixin, TenantMixin):
     last_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     token: Mapped[str] = mapped_column(String(120), default="", index=True)
     responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # An RFQ may override the supplier's own preference; `channel_source` says which rule won.
+    channel_override: Mapped[str | None] = mapped_column(String(20))
+    channel_source: Mapped[str] = mapped_column(String(24), default="supplier_preference")
+    # pending|sent|delivered|read|replied|bounced|no_response — derived from message events.
+    comm_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reply_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class MessageTemplate(Base, UUIDMixin, AuditMixin, TenantMixin):
@@ -368,6 +380,10 @@ class MessageTemplate(Base, UUIDMixin, AuditMixin, TenantMixin):
     whatsapp_template_name: Mapped[str] = mapped_column(String(120), default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # invitation|reminder|negotiation|quote_request|clarification|voice_script
+    kind: Mapped[str] = mapped_column(String(40), default="invitation", index=True)
+    description: Mapped[str] = mapped_column(String(300), default="")
+    variables: Mapped[list] = mapped_column(JSONVariant, default=list)
 
 
 class WebFormToken(Base, UUIDMixin, TimestampMixin):
@@ -426,6 +442,15 @@ class ChannelMessage(Base, UUIDMixin, TimestampMixin):
     received_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     provider_message_id: Mapped[str] = mapped_column(String(200), default="")
     extra: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    # Delivery lifecycle as the provider reports it (WhatsApp Cloud API sends status webhooks).
+    delivery_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    media_type: Mapped[str] = mapped_column(String(24), default="")   # text|document|audio|image|interactive
+    template_code: Mapped[str] = mapped_column(String(80), default="")
+    locale: Mapped[str] = mapped_column(String(8), default="ar")
+    # Set when the conversation moved from another channel, so history is never ambiguous.
+    switched_from: Mapped[str] = mapped_column(String(20), default="")
 
 
 class Attachment(Base, UUIDMixin, TimestampMixin):
@@ -914,6 +939,70 @@ class P2PStageEvent(Base, UUIDMixin, TimestampMixin):
     evidence: Mapped[dict] = mapped_column(JSONVariant, default=dict)
 
 
+class ChannelEvent(Base, UUIDMixin, TimestampMixin):
+    """Append-only cross-channel event log: sent / delivered / read / replied / opt-out / switch.
+
+    The message row answers "what was said"; this row answers "what happened to it, on which
+    channel, and who caused it". It is the searchable spine of the unified inbox.
+    """
+
+    __tablename__ = "channel_event"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    rfq_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    thread_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    channel: Mapped[str] = mapped_column(String(20), default="")
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    actor_type: Mapped[str] = mapped_column(String(12), default="system")
+    actor_id: Mapped[str | None] = mapped_column(String(36))
+    detail: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+
+
+class VoiceCallTurn(Base, UUIDMixin, TimestampMixin):
+    """One policy-checked turn of an AI call. Appended as the call runs, never rewritten."""
+
+    __tablename__ = "voice_call_turn"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    call_id: Mapped[str] = mapped_column(String(36), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=1)
+    speaker: Mapped[str] = mapped_column(String(12), default="ai")  # ai|supplier|system
+    text: Mapped[str] = mapped_column(Text, default="")
+    text_ar: Mapped[str] = mapped_column(Text, default="")
+    topic: Mapped[str] = mapped_column(String(40), default="")  # disclosure|rfq|price|validity|...
+    decision: Mapped[str] = mapped_column(String(20), default="allow")  # allow|block|disclose
+    block_code: Mapped[str] = mapped_column(String(48), default="")
+    reason: Mapped[str] = mapped_column(String(300), default="")
+
+
+class AssistantSession(Base, UUIDMixin, TimestampMixin):
+    """An internal voice-assistant conversation. Read-only by construction; every turn is audited."""
+
+    __tablename__ = "assistant_session"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    channel: Mapped[str] = mapped_column(String(16), default="text")  # text|voice
+    locale: Mapped[str] = mapped_column(String(8), default="ar")
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    permission_snapshot: Mapped[list] = mapped_column(JSONVariant, default=list)
+    role_snapshot: Mapped[list] = mapped_column(JSONVariant, default=list)
+
+
+class AssistantTurn(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "assistant_turn"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=1)
+    role: Mapped[str] = mapped_column(String(12), default="user")  # user|assistant
+    text: Mapped[str] = mapped_column(Text, default="")
+    text_ar: Mapped[str] = mapped_column(Text, default="")
+    intent: Mapped[str] = mapped_column(String(40), default="")
+    answer: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    citations: Mapped[list] = mapped_column(JSONVariant, default=list)
+    blocked_code: Mapped[str] = mapped_column(String(48), default="")
+    transcript_confidence: Mapped[float] = mapped_column(Numeric(5, 4), default=1)
+
+
 # =====================================================================  agents & audit
 class AgentRun(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "agent_run"
@@ -1202,7 +1291,7 @@ ALL_MODELS = [
     Notification, Comment, SavedView, Plan, Subscription,
     UsageEvent, Invoice, LlmProviderConfig, IntegrationConfig, IdempotencyKey, OutboxEvent,
     RetentionPolicy, DataErasureRequest, DiscoveryJob, DiscoveryCandidate, SupplierPortalToken,
-    CountryCallPolicy,
+    CountryCallPolicy, ChannelEvent, VoiceCallTurn, AssistantSession, AssistantTurn,
 ]
 
 
@@ -1222,6 +1311,8 @@ _COMPOSITE_INDEXES = [
     ("ix_goods_receipt_po_received", GoodsReceipt, ["po_id", "received_at"]),
     ("ix_supplier_invoice_po_status", SupplierInvoice, ["po_id", "status"]),
     ("ix_ledger_supplier_entry", SupplierLedgerEntry, ["tenant_id", "supplier_id", "entry_date"]),
+    ("ix_channel_event_tenant_created", ChannelEvent, ["tenant_id", "created_at"]),
+    ("ix_channel_message_thread_created", ChannelMessage, ["thread_id", "created_at"]),
 ]
 for _name, _model, _columns in _COMPOSITE_INDEXES:
     Index(_name, *[_model.__table__.c[col] for col in _columns])

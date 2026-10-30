@@ -926,3 +926,305 @@ export type PoAccounting = {
   cost_by_center: CostReport;
   accounts: { code: string; name: string; name_ar: string; kind: string }[];
 };
+
+/* ------------------------------------------------------------------ phase 3: channels, inbox, voice */
+export type ChannelKey = "whatsapp" | "voice" | "email" | "web_form";
+
+export type ChannelLabel = {
+  channel: string;
+  label: string;
+  label_ar: string;
+  enabled?: boolean;
+  primary?: boolean;
+};
+
+export type FeatureFlag = {
+  key: string;
+  enabled: boolean;
+  label_en: string;
+  label_ar: string;
+  description_en?: string;
+  description_ar?: string;
+  global_enabled?: boolean;
+  default?: boolean;
+};
+
+export type ChannelState = ChannelLabel & {
+  available: boolean;
+  opted_in: boolean;
+  reasons: string[];
+  address_hint: string;
+  priority: number;
+};
+
+export type ChannelCapabilities = {
+  channels: ChannelLabel[];
+  default_order: string[];
+  whatsapp: {
+    provider: string;
+    supports_templates: boolean;
+    supports_documents: boolean;
+    supports_interactive: boolean;
+    supports_read_receipts: boolean;
+  };
+  features: FeatureFlag[];
+};
+
+export type SupplierChannels = {
+  supplier_id: string;
+  supplier_name: string;
+  preferred_channel: string;
+  secondary_channels: string[];
+  preferred_language: string;
+  channels: ChannelState[];
+  opted_out?: { channel: string; status: string; updated_at: string }[];
+};
+
+export type RfqChannelRow = {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  channel: string;
+  channel_label: string;
+  channel_label_ar: string;
+  source: string;
+  source_label: string;
+  source_label_ar: string;
+  available: boolean;
+  opted_in: boolean;
+  reasons: string[];
+  comm_status: string;
+  comm_status_label: string;
+  comm_status_label_ar: string;
+  invitations: number;
+  replies: number;
+  last_message_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  channel_override: string | null;
+};
+
+export type RfqChannels = {
+  rfq_id: string;
+  rfq_code: string;
+  items: RfqChannelRow[];
+  channels_in_use: string[];
+  mixed_channels: boolean;
+};
+
+export type InboxMessage = {
+  id: string;
+  direction: "inbound" | "outbound";
+  channel: string;
+  channel_label: string;
+  channel_label_ar: string;
+  author_type: string;
+  author_id: string | null;
+  status: string;
+  delivery_status: string;
+  delivered_at: string | null;
+  read_at: string | null;
+  subject: string;
+  body: string;
+  body_ar: string;
+  media_type: string;
+  template_code: string;
+  locale: string;
+  created_at: string;
+};
+
+export type InboxThread = {
+  thread_id: string;
+  rfq_id: string;
+  rfq_code: string;
+  rfq_title: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  current_channel: string;
+  channels_used: string[];
+  last_message: InboxMessage;
+  last_message_at: string | null;
+  message_count: number;
+  inbound_count: number;
+  outbound_count: number;
+  comm_status: string;
+  comm_status_label: string;
+  comm_status_label_ar: string;
+  awaiting_reply: boolean;
+  preferred_channel: string;
+};
+
+export type InboxList = {
+  items: InboxThread[];
+  total: number;
+  channels: string[];
+  awaiting_reply: number;
+  generated_at: string;
+};
+
+export type InboxThreadDetail = {
+  thread_id: string;
+  rfq_id: string;
+  rfq_code: string;
+  rfq_title: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  current_channel: string;
+  reply_channel: string;
+  channels_used: string[];
+  messages: InboxMessage[];
+  events: ChannelEventView[];
+  resolved_channel: {
+    channel: string;
+    channel_label: string;
+    channel_label_ar: string;
+    available: boolean;
+    reasons: string[];
+  } | null;
+  comm_status: string;
+};
+
+export type ChannelEventView = {
+  id: string;
+  kind: string;
+  channel: string;
+  supplier_id?: string | null;
+  actor_type: string;
+  actor_id: string | null;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+};
+
+export type MessageTemplateView = {
+  id: string;
+  code: string;
+  kind: string;
+  channel: string;
+  locale: string;
+  name: string;
+  subject: string;
+  body: string;
+  whatsapp_template_name: string;
+  version: number;
+  description: string;
+  variables: string[];
+};
+
+export type TemplateLibrary = {
+  channels: { channel: string; label: string; label_ar: string; count: number }[];
+  items: Record<string, MessageTemplateView[]>;
+  total: number;
+};
+
+export type VoiceCallRow = {
+  id: string;
+  rfq_id: string;
+  supplier_id: string;
+  status: string;
+  disclosure_played: boolean;
+  consent_given: boolean;
+  recording: boolean;
+  duration_seconds: number;
+  extracted_offer_id: string | null;
+  blocked_turns: number;
+  created_at: string | null;
+};
+
+export type VoiceTurn = {
+  seq: number;
+  speaker: string;
+  text: string;
+  text_ar?: string;
+  topic: string;
+  decision: string;
+  block_code: string;
+  reason: string;
+};
+
+export type VoiceCallDetail = {
+  call_id: string;
+  rfq_id: string;
+  rfq_code: string;
+  supplier_id: string;
+  supplier_name: string;
+  status: string;
+  language: string;
+  disclosure_played: boolean;
+  consent_given: boolean;
+  recording: boolean;
+  duration_seconds: number;
+  transcript: string;
+  summary: string;
+  turns: VoiceTurn[];
+  policy_snapshot: {
+    ai_agent?: {
+      knowledge_version: string;
+      topics_answered: string[];
+      topics_blocked: string[];
+      blocked_turns: number;
+      guard: string;
+    };
+  };
+  policy: { allowed_topics: string[]; blocked_topics: string[] };
+  extraction_id: string | null;
+  created_at: string;
+};
+
+export type AssistantAnswer = {
+  ok: boolean;
+  session_id?: string;
+  intent: string;
+  channel?: string;
+  locale?: string;
+  answer_en: string;
+  answer_ar: string;
+  data: Record<string, unknown>;
+  citations: { type: string; id: string; code: string; label: string; link: string }[];
+  blocked_code: string;
+  can_act: false;
+  requires?: string | null;
+  asked_at: string;
+  error?: string;
+  codes?: string[];
+};
+
+export type AssistantSessionRow = {
+  session_id: string;
+  channel: string;
+  locale: string;
+  opened_at: string;
+  first_question: string;
+};
+
+export type AssistantTurnView = {
+  seq: number;
+  role: "user" | "assistant";
+  text: string;
+  text_ar: string;
+  intent: string;
+  answer: Record<string, unknown>;
+  citations: { type: string; id: string; code: string; label: string; link: string }[];
+  blocked_code: string;
+  at: string | null;
+};
+
+export type AssistantSessionDetail = {
+  session_id: string;
+  channel: string;
+  locale: string;
+  status: string;
+  user_id?: string;
+  roles: string[];
+  permission_snapshot: string[];
+  started_at: string | null;
+  turns: AssistantTurnView[];
+};
+
+export type VoiceFeatures = {
+  features: FeatureFlag[];
+  provider: string;
+  disclosure_required: boolean;
+  recording_requires_consent: boolean;
+};

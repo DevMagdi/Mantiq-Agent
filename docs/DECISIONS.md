@@ -280,3 +280,89 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
 70. **A partial receipt only accrues the increment.** `draft_receipt_accrual` subtracts everything
     already accrued for the order (drafts included) per line and posts the difference; a second call
     with nothing new returns `duplicate_accrual` rather than a zero-value journal.
+
+## Channels, WhatsApp and the unified inbox (phase 3)
+
+71. **One resolver, no ad-hoc channel checks.** `services/channels.resolve()` is the only place that
+    answers "where does this message go". It evaluates, in order: RFQ override → supplier preferred →
+    supplier secondary → `whatsapp, voice, email, web_form`, and a candidate only wins when it is
+    reachable (address on file, consent for WhatsApp/voice, supplier not blacklisted, tenant and
+    deployment switches on). Consequence: the RFQ screen, the inbox, the reminder job and the
+    missing-information follow-up cannot disagree about the channel.
+72. **An override is honoured even when the channel is not reachable — if a reason is given.** A buyer
+    who deliberately chooses voice for a supplier who has not consented must supply a reason, which is
+    written to `channel_event` and the audit log; without a reason the API returns
+    `channel_unavailable` with the per-channel reasons. Silent fallback would hide a compliance
+    problem, and a hard refusal would block the field team's real workflow.
+73. **Consent is per channel, per supplier, and the supplier's own words win.** `STOP`/`START` (AR and
+    EN) on any channel are processed before message ingestion and never reach the extraction pipeline;
+    an inbound WhatsApp reply by itself records an opt-in for WhatsApp (the number demonstrably works),
+    with the evidence stored. Email is implicitly permitted for legitimate B2B RFQ contact until an
+    explicit opt-out, which is the only channel where that holds.
+74. **WhatsApp is a first-class transport, not a text shooter.** The provider contract covers text,
+    approved templates (`whatsapp_template_name`), documents and interactive messages; a structured
+    quote request is ONE interactive message (Flow when configured, reply buttons otherwise) asking for
+    the three numbers a supplier can answer from a phone: unit price, lead time, validity. Sending the
+    body first and then "reconciling" rows was rejected in favour of a single audited message row.
+75. **Receipts only move forward.** `apply_delivery_status` enforces a rank
+    (`sent < delivered < read`), returns `stale_status` for a late `delivered` after a `read`, and
+    `unknown_message` for an id it does not own. WhatsApp can replay receipts; a status column that can
+    go backwards is not evidence.
+76. **Threads are per (RFQ, supplier); channel lives on the message.** `MessageThread.channel` is the
+    current channel for convenience, but every `ChannelMessage` keeps its own `channel`, and switching
+    never rewrites history. The inbox therefore derives its channel set from messages, which is the
+    only way "switched mid-conversation with history preserved" can be true.
+77. **`inbox.reply` always resolves the canonical thread.** It re-runs `ensure_thread` for the pair, so a
+    reply lands where the outbound history lives even if the caller holds a stale row, and returns
+    `switched_from` so the UI can say "moved from email to WhatsApp".
+78. **A consent refusal is a stored verdict, not an HTTP error.** WhatsApp send endpoints return `200`
+    with `ok: false`, `codes: ["BLOCK_NO_OPT_IN"|"BLOCK_FEATURE_OFF"|"BLOCK_CHANNEL_UNAVAILABLE"]` and the
+    policy snapshot, because the refusal is part of the communication record. Transport failures are
+    separate (`status: failed`). Clients read `ok`, not the status code.
+79. **Communication evidence is append-only.** `channel_event`, `voice_call_turn` and `assistant_turn`
+    have RLS like every tenant table and `UPDATE`/`DELETE` revoked from the application role
+    (migration `0016`, re-checked by `scripts/verify_rls.py`).
+80. **Reminders follow the resolved channel.** `send_reminders` no longer hardcodes email: it resolves
+    per supplier, renders the template in the supplier's language, records `channel` and `comm_status`
+    on the invitation, and keeps the 2-day/2-reminder cadence. The same resolution now drives the
+    missing-information follow-up in `extraction.request_missing_info`.
+81. **20 bilingual templates per tenant, kernel-seeded not copy-pasted.** Six phase-1 templates plus
+    fourteen phase-3 rows (WhatsApp invitation/reminder/counter-offer/quote request/missing info in AR
+    and EN, email equivalents, voice scripts) live in `catalog_data.DEFAULT_TEMPLATES` for new tenants
+    and in migration `0016` for existing ones; both paths are idempotent on
+    (code, channel, locale), and every row carries `kind` and its extracted `variables`.
+
+## AI voice and the internal assistant (phase 3)
+
+82. **Two switches, not one.** A capability needs both the deployment setting (`WHATSAPP_ENABLED`,
+    `VOICE_AI_ENABLED`, `VOICE_ASSISTANT_ENABLED`) and the tenant flag in `tenant.settings["features"]`;
+    `services/features.is_enabled()` is the only reader. Unknown keys are rejected, so a typo cannot
+    silently disable a control, and every entry point fails closed with `BLOCK_FEATURE_OFF`.
+83. **The AI voice agent is deterministic and policy-first — no free-form LLM in the call path.** Turns
+    are classified by a keyword model (`classify_question`) into approved topics (price, validity,
+    payment terms, delivery, specification, consent) and blocked ones (competitor pricing, commitments
+    and award intent, specification changes, payment execution). Answers are assembled from approved
+    RFQ data only (`approved_knowledge`, `knowledge_version: approved-data-v1`); a blocked question
+    gets a fixed refusal in the supplier's language and a `block_code`. This is deliberate: a guardrail
+    that is a prompt can be talked out of it, a guardrail that is code cannot.
+84. **Disclosure first, consent before recording, per turn audit.** `voice.start_call` plays the
+    disclosure, records the consent answer, refuses to record without it, and enforces country calling
+    hours. Every audible turn — the agent's own replies included — is persisted with `seq`, `topic`,
+    `decision`, `block_code` and `reason`, and the call's `policy_snapshot.ai_agent` summarises
+    `topics_answered`, `topics_blocked` and `blocked_turns`.
+85. **A call feeds the existing verification queue, never an offer.** Extracted fields from the
+    transcript go through `extraction` exactly like an email reply and stay human-verified; the agent
+    cannot create an approved offer, cannot accept, cannot renegotiate and cannot change a line.
+86. **The internal assistant is read-only by construction.** Intents are resolved before any query and
+    each declares the permission it needs (`assistant.INTENT_PERMISSIONS`); approve/award/sign/pay/post
+    phrases classify into `forbidden` and return `ASSISTANT_FORBIDDEN_ACTION` with guidance to the
+    human screen. The only write is `pr_create`, which calls the normal intake service and leaves a
+    `draft`/`clarifying` requisition the user submits themselves. Every response carries `can_act:
+    False`, and every turn is stored (`assistant_session`/`assistant_turn`) and audited.
+87. **Ownership is checked after permission.** A requester may hold `po:read` and still get
+    `ASSISTANT_NOT_FOUND` for an order that is not theirs; a missing permission returns
+    `ASSISTANT_PERMISSION` before any lookup. The response never includes the number it refused to
+    give.
+88. **Speech is untrusted input.** `POST /assistant/transcribe?ask=true` runs the same intake scanning
+    as any other text before answering, and the transcript is stored on the turn with its confidence;
+    the assistant is never granted a capability because the request arrived by voice.

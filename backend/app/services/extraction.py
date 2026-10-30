@@ -557,6 +557,14 @@ async def ingest_inbound(session: AsyncSession, tenant: Tenant, inbound: Inbound
     if not rfq or not supplier:
         return {"matched": False, "reason": "No RFQ/supplier match", "rfq_id": None}
 
+    # Consent before content: a STOP/START is honoured on every channel and never parsed as an offer.
+    from app.services.messaging import handle_consent_keyword
+
+    consent = await handle_consent_keyword(session, tenant, supplier, inbound.channel, inbound.body)
+    if consent.get("handled"):
+        return {"matched": False, "reason": consent["keyword"], "consent": consent,
+                "rfq_id": rfq.id, "supplier_id": supplier.id, "channel": inbound.channel}
+
     thread = await ensure_thread(session, tenant, rfq, supplier, inbound.channel,
                                  subject=inbound.subject)
 
@@ -570,6 +578,14 @@ async def ingest_inbound(session: AsyncSession, tenant: Tenant, inbound: Inbound
     session.add(message)
     thread.last_message_at = datetime.now(UTC)
     await session.flush()
+    from app.services.messaging import record_channel_event
+
+    await record_channel_event(
+        session, tenant_id=tenant.id, kind="received", channel=inbound.channel, rfq_id=rfq.id,
+        supplier_id=supplier.id, thread_id=thread.id, message_id=message.id,
+        actor_type="supplier", detail={"external_id": inbound.external_id,
+                                       "attachments": len(attachment_payloads or [])},
+    )
     await meter(session, tenant_id=tenant.id, kind="message", ref_type="inbound", ref_id=message.id)
 
     attachments_created: list[Attachment] = []
@@ -743,10 +759,17 @@ async def request_missing_info(session: AsyncSession, tenant: Tenant, rfq: RFQ, 
         context={"missing": ["unit_price" if "PRICE" in issue else "quantity" for issue in missing]},
     ))
     body = (response.data or {}).get("body_ar") or "نرجو استكمال بيانات العرض."
+    body_en = (response.data or {}).get("body_en") or body
+    from app.services import channels as channel_service
     from app.services.messaging import send_message
 
+    # A follow-up goes out where the supplier actually reads: the same resolution rule the RFQ and the
+    # reminders use, so a WhatsApp-first supplier is never chased by email only.
+    resolved = await channel_service.resolve(session, tenant, supplier, rfq=rfq)
+    channel = resolved["channel"] if resolved["available"] else "email"
     outcome = await send_message(session, tenant, rfq=rfq, supplier=supplier,
                                  subject=f"Missing information - {rfq.code}",
-                                 body=body, body_ar=body, channel="email", author_type="agent",
-                                 agent_run_id=None)
-    return {"sent": outcome.get("ok", False), "body": body, "missing": missing, **outcome}
+                                 body=body_en, body_ar=body, channel=channel, author_type="agent",
+                                 locale=supplier.preferred_language or "ar", agent_run_id=None)
+    return {"sent": outcome.get("ok", False), "body": body, "channel": channel,
+            "missing": missing, **outcome}

@@ -1,17 +1,17 @@
 # Build progress — honest status
 
-Updated: 2026-10-31 (phase 2). This file exists so nobody has to guess what works. Each row says what is
+Updated: 2026-10-31 (phase 3). This file exists so nobody has to guess what works. Each row says what is
 implemented, what is proven by a test, and what genuinely does not exist yet.
 
 Verification commands behind this snapshot. The first, second and last three run locally on SQLite /
 Node; the PostgreSQL row runs in CI (job `postgres`), because the sandbox has no PostgreSQL with
-`pgcrypto`. Real output for the local rows is pasted in `docs/PR_PHASE2.md`.
+`pgcrypto`. Real output for the local rows is pasted in `docs/PR_PHASE3.md`.
 
 ```bash
-cd backend && pytest tests                     # 583 tests, 0 failures   (local, SQLite)
+cd backend && pytest tests                     # 659 tests, 0 failures   (local, SQLite)
 cd backend && ruff check app tests             # clean                    (local)
 cd backend && alembic upgrade head && alembic check     # fresh PostgreSQL 16 (CI job postgres)
-python scripts/verify_rls.py                   # 19 guarantees: 6 original + 13 phase-2 (CI job postgres)
+python scripts/verify_rls.py                   # 29 guarantees: 6 original + 13 phase-2 + 10 phase-3
 python scripts/load_test.py --users 50 --duration 60    # PASS, see docs/LOAD_TEST.md (local, needs Redis stack)
 cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest run && npm run build
 ```
@@ -45,11 +45,11 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 18 pages across 20 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 66 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 22 pages across 22 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 74 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
 | Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
-| PostgreSQL verification | Migration chain `0001→0015`, `alembic check`, 67 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6 + 13), CI job `postgres` |
+| PostgreSQL verification | Migration chain `0001→0016`, `alembic check`, 67 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6 + 13 + 10), CI job `postgres` |
 | Load | 50 concurrent role-based sessions (reads + WebSockets): 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors; found and fixed a PII-decryption 500 and a hot-loop in the harness | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
 | P2P status machine | The eleven stages (requested → in procurement → RFQ sent → offers received → under approval → PO issued → pending receipt → received → confirmed → ready for audit → posted to accounts) derived from the documents, with an append-only transition history and a bilingual rail | `app/services/p2p.py`, `tests/test_services_p2p.py` (17), `tests/test_api_p2p_accounting_e2e.py` |
@@ -62,6 +62,15 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | Supplier sub-ledger | Invoices, payments and their journal support per supplier with a live payable balance | `accounting.supplier_account`, `GET /accounting/supplier-account/{id}` |
 | Accounting screens | Journal list + entry drawer (post/reverse with reason), chart of accounts & cost centres, trial balance / cost analysis / supplier balances, PO accounting panel and audit-package review — all bilingual with permission gating | `frontend/src/pages/JournalPage.tsx`, `AccountingReportsPage.tsx`, `AccountingSetupPage.tsx`, `components/{P2PRail,PostingsCard,AuditPackageCard}.tsx`, `frontend/src/pages/accounting.test.tsx` (6) |
 | Phase-2 RBAC | `controller` (draft/post/reverse + cost master data) and `auditor` (read-only money + package review), neither able to approve a purchase; UI matrix mirrored and asserted | `app/core/rbac.py`, `tests/test_frontend_permissions.py` |
+| Channel selection | Per-supplier preferred + secondary channel, per-RFQ override (with a reason), a resolver that ranks WhatsApp → voice → email → web form and reports *why* each candidate was rejected, mixed-channel RFQs | `app/services/channels.py`, `tests/test_services_channels.py` (12), `tests/test_api_channels.py` (18), `frontend/src/components/{RfqChannelPanel,SupplierChannelsPanel}.tsx` |
+| WhatsApp (first-class) | Text, approved templates, documents and interactive structured quote requests; inbound text/audio/document ingestion with STT and OCR → the normal extraction + verification path; delivery/read receipts that never move backwards; per-channel consent with STOP/START in Arabic and English honoured before any parsing; searchable history per supplier and per RFQ | `app/adapters/whatsapp.py`, `app/services/whatsapp_channel.py`, `tests/test_services_whatsapp.py` (11) |
+| Voice (human + AI) | Outbound calls linked to RFQ + supplier, disclosure first, recording only on explicit consent, country calling windows, full transcript and per-turn audit | `app/services/voice.py`, `app/services/voice_agent.py`, `tests/test_services_voice.py`, `tests/test_services_voice_agent.py` (9) |
+| AI voice agent | Deterministic policy-first agent: classifies every supplier utterance, answers only from approved RFQ data (price validity, delivery, payment terms, read-only specs), blocks competitor disclosure / commitments / award intent / spec changes / payment execution with a fixed refusal and a `block_code`, then feeds the transcript into the same human verification queue | `voice_agent.run_ai_call`, `tests/test_services_voice_agent.py` (9), `frontend/src/pages/VoiceCallsPage.tsx` |
+| Internal assistant | Read-only assistant for requester/buyer/manager/warehouse/finance: PR drafting (the only write, and it lands unsubmitted), P2P document status, offer/recommendation summaries, outstanding balances, supplier communication history — every intent declares the permission it needs, ownership is checked after permission, approve/award/sign/post phrases are refused, every turn is stored and audited | `app/services/assistant.py`, `tests/test_services_assistant.py` (11), `frontend/src/pages/AssistantPage.tsx` |
+| Unified inbox | One thread per (RFQ, supplier) showing every channel, the resolved reply channel, communication status, messages + events, search, and a reply that always lands on the right channel (`switched_from` when it differs) | `app/services/inbox.py`, `tests/test_services_inbox.py` (7), `frontend/src/pages/InboxPage.tsx` |
+| Templates & reminders | 20 bilingual rows per tenant (WhatsApp, email, voice scripts) with `kind`, description, extracted variables and an editable library; reminders and missing-information follow-ups resolve the supplier's channel and language instead of hardcoding email | `app/services/catalog_data.py`, `app/services/messaging.py`, `tests/test_services_reminders_templates.py` (8), `frontend/src/pages/TemplatesPage.tsx` |
+| Feature flags | Deployment switch **and** per-tenant flag, resolved in one place, unknown keys rejected, every gated endpoint failing closed with `BLOCK_FEATURE_OFF`; admin tab to toggle them with bilingual labels | `app/services/features.py`, `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off`, `frontend/src/pages/SettingsPage.tsx` |
+| Phase-3 RBAC | `channel:read/write`, `inbox:read/reply`, `voice:call`, `assistant:use` added to the matrix and mirrored in the UI; the assistant's own intent→permission map is asserted against it | `app/core/rbac.py`, `tests/test_frontend_permissions.py`, `frontend/src/lib/permissions.ts` |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox
 
@@ -71,9 +80,13 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | Real adapters | SMTP, Meta WhatsApp Cloud API, Twilio, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented; only the deterministic fakes are exercised |
 | LLM providers | Anthropic / OpenAI-compatible network calls | Implemented with retries and metering; CI uses `FakeLLM` |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
-| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 60 component/token tests, not a real browser (no browser binary is available in this sandbox) |
+| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 74 component/token tests, not a real browser (no browser binary is available in this sandbox) |
 | WebSocket at scale | Redis pub/sub fan-out | The hub is in-process; multi-replica deployments need the fan-out documented in `docs/API.md` |
 | Real payment execution | Bank/PSP integration | Deliberately absent: the product records payments made outside it. `payment_suggestion.execution` is literally `outside_platform`, and there is no adapter seam to enable by accident |
+| WhatsApp production transport | A real Meta Cloud API / BSP account (phone number id, permanent token, approved template names) | `WhatsAppProvider` is implemented against the documented Cloud API shapes; CI runs the deterministic fake, so retries, receipts and rich messages are proven but not against Meta's live service |
+| Voice media (STT/TTS duplex) | A telephony provider with media streams | The AI agent plays a scripted transcript through the `TelephonyProvider` seam and stores every turn; there is no live audio bridge, so "the AI speaks" is a scripted, audited turn, not a live synthesis |
+| Assistant natural language | Nothing — by design the intent classifier is keyword/rule based (`assistant.classify`), the answers are assembled from approved data, and no LLM is in the loop | A wider variety of phrasings falls back to `help`; the upside is that the RBAC and forbidden-action guarantees cannot be prompt-injected away |
+| AI voice free-form dialogue | Deliberately absent | Same reason as above: `voice_agent.classify_question` is deterministic, so a supplier cannot talk the agent past the guardrail. The approved answer set is `approved-data-v1` |
 
 ## Not implemented (deliberate, documented, no fake screens)
 
@@ -81,7 +94,6 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | --- | --- | --- |
 | SSO (SAML/OIDC) | No identity provider in scope; a fake login would be dishonest | `GET /auth/sso/config` reports provider availability from env; `app/services/auth.py` is the seam |
 | Fully automated key rotation CLI | Needs a running secret manager | `app/core/crypto.py` records `key_id` so DEKs can be re-wrapped; procedure in `docs/SECURITY.md` |
-| Real duplex voice (STT/TTS loop) | Needs a telephony provider with media streams | `TelephonyProvider` interface in `app/adapters/telephony_ocr_stt.py` |
 | Mobile app | Not in scope | The API is versioned and CORS-configured for a future client |
 | e-Invoicing / VAT submission | Country-specific compliance not in the SRS extract | Invoice model carries `lines`, `currency`, `status`; a submission adapter would slot in next to the payment adapter |
 
@@ -108,6 +120,12 @@ the Celery workers are not executed here; their code paths run eagerly in the te
 5. Frontend bundle: 400 kB (108 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
    chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
    the post-award screens ship in the main chunk.
-6. The load test measures one uvicorn worker against one PostgreSQL instance; it does not prove
+6. `channels.resolve` reads supplier consent one channel at a time; a bulk RFQ dispatch reuses the
+   memoised snapshot, so a supplier who opts out *while* a batch is running is honoured on the next
+   batch, not mid-batch.
+7. The assistant and the AI voice agent are deliberately deterministic (see above): adding an LLM
+   later must not move the policy check out of code, which is why `voice_agent` returns
+   `knowledge_version` and per-turn `block_code` — a regression there is visible in the data.
+8. The load test measures one uvicorn worker against one PostgreSQL instance; it does not prove
    horizontal scaling, and the WebSocket hub still needs the Redis fan-out before running more than
    one API replica (`docs/API.md`).

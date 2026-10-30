@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, KeyRound, Plug, RefreshCw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/session";
 import { PERM } from "@/lib/permissions";
 import { date, money, num } from "@/lib/format";
 import type { AppLang } from "@/i18n";
+import type { FeatureFlag } from "@/lib/types";
 import type { ApiKey, Integration, IntegrationsPayload, Page, Usage } from "@/lib/types";
 
 type Capabilities = {
@@ -49,6 +50,8 @@ export default function SettingsPage() {
     // Editing retention is `settings:update`; a read-only role must not get a form whose save
     // would be refused.
     { value: "retention", label: t("settings.retention"), permission: PERM.settingsUpdate },
+    // Channel and AI-voice switches: readable with settings:read, writable with settings:update.
+    { value: "channels", label: t("settings.channelsTab"), permission: PERM.settingsRead },
   ].filter((item) => can(item.permission));
 
   const [tab, setTab] = useState(tabs[0]?.value ?? "");
@@ -67,6 +70,7 @@ export default function SettingsPage() {
           {can(PERM.adminLlm) ? <TabPanel value="llm"><LlmSettings lang={lang} /></TabPanel> : null}
           {can(PERM.adminBilling) ? <TabPanel value="billing"><Billing lang={lang} /></TabPanel> : null}
           {can(PERM.settingsUpdate) ? <TabPanel value="retention"><Retention /></TabPanel> : null}
+          <TabPanel value="channels"><ChannelFeatures /></TabPanel>
         </Tabs>
       )}
     </div>
@@ -668,6 +672,67 @@ function Retention() {
         <span>{`${t("dashboard.days")}: ${t("settings.retention")} 30–3650`}</span>
         <span>{`Purge after erasure: ${retention.data?.defaults.purge_after_request_days ?? 30} ${t("dashboard.days")}`}</span>
       </div>
+    </Card>
+  );
+}
+
+
+/** Tenant switches for the channel layer and the AI voice features (never for the whole platform). */
+function ChannelFeatures() {
+  const { t, i18n } = useTranslation();
+  const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
+  const { can } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const canWrite = can(PERM.settingsUpdate);
+
+  const features = useQuery({
+    queryKey: ["feature-flags"],
+    queryFn: () => api.get<{ features: FeatureFlag[] }>("/api/v1/settings/features"),
+  });
+
+  const toggle = useMutation({
+    mutationFn: (payload: { key: string; enabled: boolean }) =>
+      api.patch("/api/v1/settings/features", { features: { [payload.key]: payload.enabled } }),
+    onSuccess: async () => {
+      toast.push(t("channels.featureSaved"), "ok");
+      await queryClient.invalidateQueries({ queryKey: ["feature-flags"] });
+    },
+    onError: (error) => toast.push(errorMessage(error), "danger"),
+  });
+
+  return (
+    <Card>
+      <CardHeader title={t("channels.featuresTitle")} subtitle={t("channels.featuresHint")} />
+      {features.isLoading ? (
+        <LoadingBlock rows={5} />
+      ) : features.error ? (
+        <ErrorState message={errorMessage(features.error)} onRetry={() => void features.refetch()} />
+      ) : (
+        <ul className="divide-y divide-line/60">
+          {(features.data?.features ?? []).map((flag) => (
+            <li key={flag.key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm text-ink">{lang === "ar" ? flag.label_ar : flag.label_en}</p>
+                <p className="text-2xs text-ink-subtle">{flag.key}</p>
+                {flag.global_enabled === false ? (
+                  <p className="text-2xs text-[color:var(--warn-ink)]">{t("channels.featureGlobalOff")}</p>
+                ) : null}
+              </div>
+              <label className="flex items-center gap-2 text-xs text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={flag.enabled}
+                  disabled={!canWrite || toggle.isPending || flag.global_enabled === false}
+                  onChange={(event) => toggle.mutate({ key: flag.key, enabled: event.target.checked })}
+                  aria-label={lang === "ar" ? flag.label_ar : flag.label_en}
+                />
+                {flag.enabled ? t("channels.featureOn") : t("channels.featureOff")}
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

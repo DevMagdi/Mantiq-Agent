@@ -182,6 +182,115 @@ DEFAULT_TEMPLATES = [
         "subject": "عرض مقابل - {{rfq_code}}",
         "body": "السيد/{{supplier_name}},\n{{message_body}}\nمع التقدير،\n{{buyer_name}}\n{{tenant_name}}",
     },
+    # ---------------------------------------------------------------- phase 3: WhatsApp first
+    {
+        "code": "rfq_invitation", "channel": "whatsapp", "locale": "en", "name": "WhatsApp invitation",
+        "subject": "", "body": (
+            "Hello {{supplier_name}}, {{tenant_name}} is requesting a quotation for {{title}} "
+            "({{rfq_code}}). Deadline {{deadline}}. Reply here with your unit price, lead time and "
+            "offer validity, or submit through: {{web_form_url}}"
+        ),
+        "whatsapp_template_name": "rfq_invitation_en",
+    },
+    {
+        "code": "reminder", "channel": "whatsapp", "locale": "ar", "name": "تذكير واتساب",
+        "subject": "", "body": (
+            "تذكير ودّي {{supplier_name}}: عرض السعر {{rfq_code}} يُغلق {{deadline}}. "
+            "يسعدنا استلام سعرك ومدة التوريد هنا، أو عبر {{web_form_url}}"
+        ),
+        "whatsapp_template_name": "reminder_ar",
+    },
+    {
+        "code": "reminder", "channel": "whatsapp", "locale": "en", "name": "WhatsApp reminder",
+        "subject": "", "body": (
+            "A quick reminder {{supplier_name}}: RFQ {{rfq_code}} closes on {{deadline}}. "
+            "Reply with your price and lead time here, or via {{web_form_url}}"
+        ),
+        "whatsapp_template_name": "reminder_en",
+    },
+    {
+        "code": "reminder", "channel": "email", "locale": "en", "name": "Reminder",
+        "subject": "Reminder: RFQ {{rfq_code}}",
+        "body": (
+            "Dear {{supplier_name}},\nThis is a reminder that RFQ {{rfq_code}} closes on {{deadline}}.\n"
+            "Please send your offer through {{web_form_url}}.\n\nThank you,\n{{tenant_name}}"
+        ),
+    },
+    {
+        "code": "counter_offer", "channel": "whatsapp", "locale": "ar", "name": "عرض مقابل واتساب",
+        "subject": "", "body": "{{supplier_name}}، بخصوص {{rfq_code}}: {{message_body}} — {{buyer_name}}، {{tenant_name}}",
+        "whatsapp_template_name": "counter_offer_ar",
+    },
+    {
+        "code": "counter_offer", "channel": "whatsapp", "locale": "en", "name": "WhatsApp counter-offer",
+        "subject": "", "body": "{{supplier_name}}, regarding {{rfq_code}}: {{message_body}} — {{buyer_name}}, {{tenant_name}}",
+        "whatsapp_template_name": "counter_offer_en",
+    },
+    {
+        "code": "counter_offer", "channel": "email", "locale": "en", "name": "Counter-offer",
+        "subject": "Counter-offer - {{rfq_code}}",
+        "body": "Dear {{supplier_name}},\n{{message_body}}\nBest regards,\n{{buyer_name}}\n{{tenant_name}}",
+    },
+    {
+        "code": "quote_request", "channel": "whatsapp", "locale": "ar", "name": "طلب عرض سعر منظم",
+        "subject": "", "body": (
+            "بخصوص {{rfq_code}}، نحتاج ثلاثة أرقام فقط: سعر الوحدة، مدة التوريد بالأيام، وصلاحية العرض. "
+            "الشروط: {{payment_terms}} — التسليم {{delivery_location}}."
+        ),
+        "whatsapp_template_name": "quote_request_ar",
+    },
+    {
+        "code": "quote_request", "channel": "whatsapp", "locale": "en", "name": "Structured quote request",
+        "subject": "", "body": (
+            "For {{rfq_code}} we need three numbers: unit price, lead time in days, and offer validity. "
+            "Terms: {{payment_terms}} — delivery {{delivery_location}}."
+        ),
+        "whatsapp_template_name": "quote_request_en",
+    },
+    {
+        "code": "missing_info", "channel": "whatsapp", "locale": "ar", "name": "استكمال بيانات واتساب",
+        "subject": "", "body": (
+            "شكراً {{supplier_name}} على العرض. لنستطيع المقارنة نحتاج: {{missing_fields}}. "
+            "يمكنك الرد هنا مباشرة."
+        ),
+        "whatsapp_template_name": "missing_info_ar",
+    },
+    {
+        "code": "missing_info", "channel": "whatsapp", "locale": "en", "name": "WhatsApp missing info",
+        "subject": "", "body": (
+            "Thank you {{supplier_name}}. To compare offers we still need: {{missing_fields}}. "
+            "You can reply here."
+        ),
+        "whatsapp_template_name": "missing_info_en",
+    },
+    # ---------------------------------------------------------------- phase 3: voice scripts
+    {
+        "code": "voice_script", "channel": "voice", "locale": "ar", "name": "نص مكالمة آلية",
+        "subject": "", "body": (
+            "[إفصاح] {{disclosure}}\n"
+            "[الطلب] {{tenant_name}} بخصوص {{rfq_code}}: {{quantity_summary}}. الموعد النهائي {{deadline}}.\n"
+            "[المطلوب] سعر الوحدة، مدة التوريد، صلاحية العرض، وشروط السداد.\n"
+            "[مسموح] أسئلة عن المواصفات كما هي مكتوبة، وشركاء الشروط المعلنة فقط.\n"
+            "[ممنوع] أسعار المنافسين، أي التزام أو قبول، أو تغيير المواصفات.\n"
+            "[الإغلاق] شكراً، سيصلك تأكيد مكتوب على واتساب."
+        ),
+    },
+    {
+        "code": "voice_script", "channel": "voice", "locale": "en", "name": "AI call script",
+        "subject": "", "body": (
+            "[Disclosure] {{disclosure}}\n"
+            "[Request] {{tenant_name}} regarding {{rfq_code}}: {{quantity_summary}}. Deadline {{deadline}}.\n"
+            "[Ask for] unit price, lead time, offer validity and payment terms.\n"
+            "[Allowed] questions about the specification as written, and published terms only.\n"
+            "[Forbidden] competitor prices, any commitment or acceptance, or a specification change.\n"
+            "[Close] Thank you, a written confirmation follows on WhatsApp."
+        ),
+    },
+    {
+        "code": "clarification", "channel": "whatsapp", "locale": "ar", "name": "استيضاح واتساب",
+        "subject": "", "body": "{{supplier_name}}، بخصوص {{rfq_code}}: {{question}} — {{buyer_name}}، {{tenant_name}}",
+        "whatsapp_template_name": "clarification_ar",
+    },
 ]
 
 COUNTRY_CALL_POLICIES = [

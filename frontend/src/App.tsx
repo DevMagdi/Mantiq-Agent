@@ -19,6 +19,10 @@ import AccountingSetupPage from "./pages/AccountingSetupPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
+import InboxPage from "./pages/InboxPage";
+import TemplatesPage from "./pages/TemplatesPage";
+import VoiceCallsPage from "./pages/VoiceCallsPage";
+import AssistantPage from "./pages/AssistantPage";
 import PublicFormPage from "./pages/PublicFormPage";
 import PublicPortalPage from "./pages/PublicPortalPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -117,6 +121,26 @@ export default function App() {
         <Route path="/activity" element={
             <RequirePermission permission={PERM.auditRead}>
               <ActivityPage />
+            </RequirePermission>
+          } />
+        <Route path="/inbox" element={
+            <RequirePermission permission={PERM.inboxRead}>
+              <InboxPage />
+            </RequirePermission>
+          } />
+        <Route path="/templates" element={
+            <RequirePermission permission={PERM.rfqRead}>
+              <TemplatesPage />
+            </RequirePermission>
+          } />
+        <Route path="/voice" element={
+            <RequirePermission permission={PERM.voiceCall}>
+              <VoiceCallsPage />
+            </RequirePermission>
+          } />
+        <Route path="/assistant" element={
+            <RequirePermission permission={PERM.assistantUse}>
+              <AssistantPage />
             </RequirePermission>
           } />
         <Route path="/settings" element={

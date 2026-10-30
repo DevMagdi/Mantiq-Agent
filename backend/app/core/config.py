@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     whatsapp_token: str = ""
     whatsapp_phone_id: str = ""
     whatsapp_verify_token: str = "verify-me"
+    whatsapp_app_secret: str = ""
+    # A published WhatsApp Flow id gives suppliers a structured quote form; without one the
+    # provider falls back to an approved template that asks for the same three numbers.
+    whatsapp_quote_flow_id: str = ""
+    # Phase 3 channel + AI-voice master switches. Both layers must agree: this global switch AND
+    # the tenant feature flag (tenant.settings["features"]) before a channel or AI feature is used.
+    whatsapp_enabled: bool = True
+    voice_ai_enabled: bool = True
+    voice_assistant_enabled: bool = True
+    whatsapp_daily_cap: int = 400
+    whatsapp_session_window_hours: int = 24
     telephony_provider: str = "fake"  # fake | twilio
     telephony_sid: str = ""
     telephony_token: str = ""

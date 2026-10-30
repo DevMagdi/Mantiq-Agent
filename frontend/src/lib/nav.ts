@@ -1,5 +1,8 @@
 import {
   Activity,
+  AudioLines,
+  Inbox,
+  MessagesSquare,
   BarChart3,
   BookOpen,
   Calculator,
@@ -10,6 +13,7 @@ import {
   LayoutDashboard,
   PackageCheck,
   Settings,
+  Sparkles,
   Truck,
   type LucideIcon,
 } from "lucide-react";
@@ -55,11 +59,21 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "communication",
+    labelKey: "nav.groups.communication",
+    items: [
+      { to: "/inbox", key: "inbox", icon: Inbox, permission: PERM.inboxRead },
+      { to: "/templates", key: "templates", icon: MessagesSquare, permission: PERM.rfqRead },
+      { to: "/voice", key: "voiceCalls", icon: AudioLines, permission: PERM.voiceCall },
+    ],
+  },
+  {
     id: "insight",
     labelKey: "nav.groups.insight",
     items: [
       { to: "/analytics", key: "analytics", icon: BarChart3, permission: PERM.reportRead },
       { to: "/activity", key: "agents", icon: Activity, permission: PERM.auditRead },
+      { to: "/assistant", key: "assistant", icon: Sparkles, permission: PERM.assistantUse },
       { to: "/settings", key: "settings", icon: Settings, permission: PERM.settingsRead },
     ],
   },

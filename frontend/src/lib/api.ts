@@ -56,6 +56,7 @@ function readCookie(name: string): string {
 export type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
+  form?: FormData;
   signal?: AbortSignal;
   raw?: boolean;
   skipAuth?: boolean;
@@ -94,11 +95,12 @@ async function refreshSession(): Promise<boolean> {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, signal, raw = false, skipAuth = false, retryOn401 = true } = options;
+  const { method = "GET", body, form, signal, raw = false, skipAuth = false, retryOn401 = true } = options;
   const headers: Record<string, string> = { accept: "application/json" };
   const token = session.get();
   if (token && !skipAuth) headers.authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["content-type"] = "application/json";
+  // Multipart bodies set their own boundary; never force a JSON content type on them.
+  if (body !== undefined && !form) headers["content-type"] = "application/json";
   if (!skipAuth) {
     const csrf = readCookie(CSRF_COOKIE);
     if (csrf) headers["x-csrf-token"] = csrf;
@@ -108,7 +110,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     method,
     headers,
     credentials: "include",
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
     signal,
   });
 
@@ -141,6 +143,9 @@ export const api = {
   put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: "PUT", body }),
   delete: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "DELETE" }),
+  /** Multipart upload (voice notes, scanned documents). The browser sets the boundary. */
+  upload: <T>(path: string, form: FormData, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "POST", form }),
   download: async (path: string, filename: string) => {
     const blob = await request<Blob>(path, { raw: true });
     const url = URL.createObjectURL(blob);

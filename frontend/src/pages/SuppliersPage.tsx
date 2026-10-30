@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeading } from "@/components/Shell";
 import { DataTable } from "@/components/DataTable";
+import { SupplierChannelsPanel } from "@/components/SupplierChannelsPanel";
 import { Badge, Card, Drawer, EmptyState, ErrorState, LoadingBlock, Progress, Spinner, StatusChip, useToast } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { date, num, percent } from "@/lib/format";
@@ -248,6 +249,10 @@ export default function SuppliersPage() {
               ) : (
                 <p className="text-ink-muted">{t("common.none")}</p>
               )}
+            </section>
+            <section>
+              <p className="label">{t("channels.supplierTitle")}</p>
+              <SupplierChannelsPanel supplierId={selected.id} />
             </section>
             {(selected.flags ?? []).length > 0 ? (
               <section>
