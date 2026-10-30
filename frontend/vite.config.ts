@@ -11,10 +11,14 @@ export default defineConfig({
     strictPort: false,
     // The preview proxy terminates TLS on an external host, so allow any Host header.
     allowedHosts: true,
+    // WebSocket upgrades must be proxied with `ws: true`, otherwise the handshake is answered by
+    // Vite itself and the browser reports "WebSocket connection to ... failed".
     proxy: {
-      "/api": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", changeOrigin: true },
+      "/api": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", changeOrigin: true, ws: true },
       "/health": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", changeOrigin: true },
-      "/ws": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", ws: true },
+      "/ready": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", changeOrigin: true },
+      "/metrics": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", changeOrigin: true },
+      "/ws": { target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000", ws: true, changeOrigin: true },
     },
   },
   build: {
