@@ -127,6 +127,9 @@ jobs:
               raise SystemExit("SQLite was accepted outside test/sandbox")
           PY
 
+      - name: Seed the demo dataset through the CLI (also proves the CLI works on PostgreSQL)
+        run: python -m app.cli seed-demo
+
       - name: Tenant isolation is enforced by RLS
         run: python ../scripts/verify_rls.py
 

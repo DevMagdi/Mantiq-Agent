@@ -38,6 +38,54 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         failures.append(name)
 
 
+async def _create_probe_tenant(conn: asyncpg.Connection) -> str:
+    """Insert a disposable second tenant, filling every NOT NULL column explicitly."""
+    required = await conn.fetch(
+        "SELECT column_name, data_type, character_maximum_length FROM information_schema.columns "
+        "WHERE table_name = 'tenant' AND is_nullable = 'NO' AND column_default IS NULL"
+    )
+    probe_id = str(uuid.uuid4())
+    known: dict[str, object] = {
+        "id": probe_id,
+        "name": "RLS Probe",
+        "slug": f"rls-probe-{probe_id[:8]}",
+        "kind": "customer",
+        "locale": "ar",
+        "status": "active",
+        "plan_code": "starter",
+    }
+    columns: list[str] = []
+    placeholders: list[str] = []
+    params: list[object] = []
+    for row in required:
+        name, data_type = row["column_name"], row["data_type"]
+        columns.append(name)
+        if name in {"created_at", "updated_at"}:
+            placeholders.append("now()")
+            continue
+        if name in known:
+            params.append(known[name])
+        elif data_type.startswith("timestamp"):
+            placeholders.append("now()")
+            continue
+        elif data_type in {"integer", "bigint", "numeric", "double precision"}:
+            params.append(0)
+        elif data_type == "boolean":
+            params.append(False)
+        elif data_type.startswith("json"):
+            params.append("{}")
+        else:
+            fallback = f"probe-{name}"
+            limit = row["character_maximum_length"]
+            params.append(fallback[: int(limit)] if limit else fallback)
+        placeholders.append(f"${len(params)}")
+    await conn.execute(
+        f"INSERT INTO tenant ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
+        *params,
+    )
+    return probe_id
+
+
 async def main() -> int:
     if not DSN:
         print("DATABASE_URL (or RLS_DSN) must point at a migrated PostgreSQL database")
@@ -53,15 +101,11 @@ async def main() -> int:
             )
         ]
         if len(tenants) < 2:
-            # A fresh install has one tenant; create a throwaway second one to test isolation.
-            extra = str(uuid.uuid4())
-            await conn.execute(
-                "INSERT INTO tenant (id, name, slug, kind, locale, status, created_at, updated_at) "
-                "VALUES ($1, 'RLS Probe', $2, 'customer', 'ar', 'active', now(), now())",
-                extra, f"rls-probe-{extra[:8]}",
-            )
-            tenants.append(extra)
-            print(f"note  created a throwaway second tenant for the check")
+            tenants.append(await _create_probe_tenant(conn))
+            print("note  created a throwaway second tenant for the check")
+        if not any(True for _ in tenants):
+            print("FAIL  no tenant rows — run `python -m app.cli seed-demo` first")
+            return 1
 
         await conn.execute(f"SET ROLE {APP_ROLE}")
         await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
