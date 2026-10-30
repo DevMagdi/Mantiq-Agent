@@ -18,7 +18,7 @@ from app.db.models.entities import (
     Supplier,
     Tenant,
 )
-from app.services import numbers
+from app.services import numbers, p2p
 from app.services.common import next_code, notify
 
 log = logging.getLogger("procureai.po")
@@ -57,6 +57,7 @@ async def create_po_for_offer(session: AsyncSession, tenant: Tenant, rfq: RFQ, o
                  title=f"PO {po.code} issued to {supplier.name}",
                  title_ar=f"تم إصدار أمر شراء {po.code} للمورد {supplier.name}",
                  link=f"/purchase-orders/{po.id}")
+    await p2p.touch(session, tenant.id, po, actor_id=created_by, source="po_issued")
     return po
 
 

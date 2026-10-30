@@ -181,6 +181,9 @@ async def seed_demo(session: AsyncSession, tenant: Tenant, *, demo_password: str
         ("requester@nile.example.com", "Mariam Adel", "مريم عادل", "requester"),
         ("finance@nile.example.com", "Tarek Nabil", "طارق نبيل", "finance_approver"),
         ("storekeeper@nile.example.com", "Youssef Samir", "يوسف سمير", "warehouse"),
+        # Phase 2: the two roles that close the loop — the books and the audit gate.
+        ("controller@nile.example.com", "Nour El-Sayed", "نور السيد", "controller"),
+        ("auditor@nile.example.com", "Rania Fouad", "رانيا فؤاد", "auditor"),
     ]:
         user = (await session.execute(
             select(User).where(User.tenant_id == tenant.id, User.email == email)

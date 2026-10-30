@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.api.deps import Context, require
 from app.core.audit import audit
 from app.core.config import settings
-from app.core.errors import NotFound, ValidationFailed
+from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.db.models.entities import (
     Attachment,
     Category,
@@ -22,8 +22,10 @@ from app.db.models.entities import (
     Supplier,
     SupplierCertification,
     TaxonomyNode,
+    User,
 )
 from app.services import intake, numbers
+from app.services.common import notify
 from app.services.discovery import approve_candidates, list_candidates, reject_candidates, run_discovery
 from app.services.erp_service import import_requisitions, test_connection
 from app.services.portal import create_portal_token
@@ -125,6 +127,7 @@ async def list_prs(ctx: Context = Depends(require("pr:read")), status: str | Non
         "currency": pr.currency, "total_estimate": str(pr.total_estimate),
         "confidence": float(pr.confidence or 0), "needed_by": pr.needed_by,
         "clarification_resolved": pr.clarification_resolved, "created_at": pr.created_at,
+        "department": pr.department, "assigned_to": pr.assigned_to, "assigned_at": pr.assigned_at,
     } for pr in rows], "total": int(total), "page": page, "page_size": page_size}
 
 
@@ -153,6 +156,8 @@ async def get_pr(pr_id: str, ctx: Context = Depends(require("pr:read"))):
         "confidence": float(pr.confidence or 0), "needed_by": pr.needed_by,
         "clarification_resolved": pr.clarification_resolved, "notes": pr.notes,
         "plant_id": pr.plant_id, "raw_input": pr.raw_input[:4000],
+        "department": pr.department, "assigned_to": pr.assigned_to, "assigned_at": pr.assigned_at,
+        "requested_by": pr.requested_by,
         "lines": [{
             "id": line.id, "line_no": line.line_no, "description": line.description,
             "quantity": str(line.quantity), "uom": line.uom, "taxonomy_code": line.taxonomy_code,
@@ -354,6 +359,55 @@ async def submit_pr(pr_id: str, ctx: Context = Depends(require("pr:update"))):
                 actor_label=ctx.user.email, entity_type="purchase_requisition", entity_id=pr.id)
     await ctx.session.commit()
     return {"ok": True, "status": pr.status}
+
+
+class AssignIn(BaseModel):
+    """Route a requisition to a named procurement owner (phase 2, requirement 1.1)."""
+
+    assigned_to: str | None = None
+    department: str = ""
+
+
+@router.post("/requests/{pr_id}/assign", summary="Route a requisition to a procurement owner")
+async def assign_pr(pr_id: str, payload: AssignIn, ctx: Context = Depends(require("pr:update"))):
+    pr = (await ctx.session.execute(
+        select(PurchaseRequisition).where(PurchaseRequisition.id == pr_id,
+                                          PurchaseRequisition.tenant_id == ctx.tenant_id)
+    )).scalar_one_or_none()
+    if not pr:
+        raise NotFound("Requisition not found.")
+    if pr.status in {"cancelled", "rfq_created"}:
+        raise Conflict(f"A requisition in status '{pr.status}' can no longer be routed.")
+    owner_id = payload.assigned_to or ctx.user_id
+    owner = (await ctx.session.execute(
+        select(User).where(User.id == owner_id, User.tenant_id == ctx.tenant_id)
+    )).scalar_one_or_none()
+    if not owner:
+        raise NotFound("The named owner is not a user of this tenant.")
+    if not ({owner.primary_role, *(owner.roles or [])} & {"buyer", "procurement_manager", "admin"}):
+        raise ValidationFailed("A requisition can only be routed to procurement (buyer or manager).")
+    before = {"status": pr.status, "assigned_to": pr.assigned_to, "department": pr.department}
+    pr.assigned_to = owner.id
+    pr.assigned_at = datetime.now(UTC)
+    if payload.department.strip():
+        pr.department = payload.department.strip()[:120]
+    # Routing is what moves a request from the requesting department into procurement.
+    if pr.status in {"draft", "clarifying", "ready"}:
+        pr.status = "in_procurement"
+    await audit(ctx.session, tenant_id=ctx.tenant_id, action="pr.assigned", actor_id=ctx.user_id,
+                actor_label=ctx.user.email, entity_type="purchase_requisition", entity_id=pr.id,
+                before=before, after={"status": pr.status, "assigned_to": pr.assigned_to,
+                                      "department": pr.department},
+                ip=ctx.ip, request_id=ctx.request_id)
+    await notify(ctx.session, tenant_id=ctx.tenant_id, user_id=owner.id, kind="requisition_assigned",
+                 title=f"Requisition {pr.code} routed to you",
+                 title_ar=f"تم تحويل الطلب {pr.code} إليك",
+                 body=f"{pr.title} · {payload.department or pr.department}".strip(" ·"),
+                 link=f"/requests/{pr.id}", severity="warning")
+    await ctx.session.commit()
+    return {"ok": True, "status": pr.status, "assigned_to": pr.assigned_to,
+            "assigned_to_name": owner.full_name or owner.email, "department": pr.department,
+            "assigned_at": pr.assigned_at}
 
 
 # ------------------------------------------------------------------ ERP

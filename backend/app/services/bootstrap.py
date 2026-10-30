@@ -18,7 +18,9 @@ from app.db.models.entities import (
     ApprovalLimit,
     ApprovalStep,
     Category,
+    CostCenter,
     CountryCallPolicy,
+    GLAccount,
     MessageTemplate,
     Plan,
     Role,
@@ -142,7 +144,30 @@ async def seed_tenant_defaults(session: AsyncSession, tenant: Tenant) -> dict:
         ])
         created["chains"] += 1
 
+    # High-value band: the auditor joins the chain, which is how "auditor involvement" is expressed
+    # without inventing a second approval engine.
+    audit_chain = (await session.execute(
+        select(ApprovalChain).where(ApprovalChain.tenant_id == tenant.id,
+                                    ApprovalChain.name == "High value with audit")
+    )).scalars().first()
+    if not audit_chain:
+        audit_chain = ApprovalChain(tenant_id=tenant.id, name="High value with audit",
+                                    min_amount=Decimal("1000000"), max_amount=None,
+                                    currency=tenant.currency, is_active=True)
+        session.add(audit_chain)
+        await session.flush()
+        session.add_all([
+            ApprovalStep(tenant_id=tenant.id, chain_id=audit_chain.id, step_no=1,
+                         role_code="procurement_manager", threshold_amount=Decimal("0"), sla_hours=48),
+            ApprovalStep(tenant_id=tenant.id, chain_id=audit_chain.id, step_no=2,
+                         role_code="finance_approver", threshold_amount=Decimal("250000"), sla_hours=48),
+            ApprovalStep(tenant_id=tenant.id, chain_id=audit_chain.id, step_no=3,
+                         role_code="auditor", threshold_amount=Decimal("1000000"), sla_hours=48),
+        ])
+        created["chains"] += 1
+
     for role_code, amount in [("procurement_manager", "250000"), ("finance_approver", "5000000"),
+                              ("controller", "5000000"), ("auditor", "10000000"),
                               ("admin", "10000000")]:
         exists = (await session.execute(
             select(ApprovalLimit).where(ApprovalLimit.tenant_id == tenant.id,
@@ -153,6 +178,27 @@ async def seed_tenant_defaults(session: AsyncSession, tenant: Tenant) -> dict:
             session.add(ApprovalLimit(tenant_id=tenant.id, role_code=role_code, category_code=None,
                                       max_amount=Decimal(amount), currency=tenant.currency))
             created["limits"] += 1
+
+    created["accounts"] = 0
+    created["cost_centers"] = 0
+    from app.services.accounting import ACCOUNTS, UNALLOCATED_CENTER, ensure_account, ensure_cost_center
+
+    for code, name, name_ar, kind, normal, control in ACCOUNTS:
+        existing = (await session.execute(
+            select(GLAccount).where(GLAccount.tenant_id == tenant.id, GLAccount.code == code)
+        )).scalar_one_or_none()
+        if not existing:
+            await ensure_account(session, tenant, code=code, name=name, name_ar=name_ar, kind=kind,
+                                 normal_balance=normal, is_control=control)
+            created["accounts"] += 1
+    centre = (await session.execute(
+        select(CostCenter).where(CostCenter.tenant_id == tenant.id, CostCenter.code == UNALLOCATED_CENTER)
+    )).scalar_one_or_none()
+    if not centre:
+        await ensure_cost_center(session, tenant, code=UNALLOCATED_CENTER, name="Unallocated",
+                                 name_ar="غير موزّع",
+                                 description="Default dimension until a real cost centre is chosen.")
+        created["cost_centers"] += 1
 
     sub = (await session.execute(select(Subscription).where(Subscription.tenant_id == tenant.id))).scalars().first()
     if not sub:

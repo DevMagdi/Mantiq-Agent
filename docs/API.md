@@ -132,13 +132,99 @@ Every suggestion carries `requires_human_approval: true`, `execution: "outside_p
 reason list (`PREFERRED_SUPPLIER`, `OVERDUE`, `CROSS_BORDER_HIGH_VALUE`, …). There is no endpoint
 that pays, and the agent has no tool that can reach one.
 
+## Accounting (phase 2): accrual → posting → supplier ledger
+
+The accounting module is the only place where a purchase becomes a number. Every endpoint below is
+permission-gated (`accounting:read|write|post|reverse`, `cost:read|write`, `audit_package:read|review`)
+and **no endpoint moves money**: `payment_method` on an invoice is a *suggestion*, not an execution.
+
+```bash
+# 0. the eleven-stage rail and its written history
+GET  /api/v1/purchase-orders/{po_id}/lifecycle
+#    {current, stages:[{code,label_en,label_ar,state,reached_at,actor_id}],
+#     next_action_en/ar, history:[{stage,source,reached_at,actor_id}]}
+
+# 1. the auditor package — assembled automatically when the requester confirms
+GET  /api/v1/purchase-orders/{po_id}/audit-package
+POST /api/v1/purchase-orders/{po_id}/audit-package          # re-assemble after new evidence
+POST /api/v1/audit-packages/{package_id}/review              {"decision":"accept|query","comment":"…"}
+#    package.verification.intact is recomputed on every read (SHA-256 manifest)
+
+# 2. master data (accounting:write)
+GET  /api/v1/accounting/accounts
+POST /api/v1/accounting/accounts                             {"code":"550100","name":"…","name_ar":"…","kind":"expense"}
+PATCH /api/v1/accounting/accounts/{code}
+GET  /api/v1/accounting/cost-centers
+POST /api/v1/accounting/cost-centers                         {"code":"CC-100","name":"…","name_ar":"…"}
+
+# 3. the accrual at the receiving door (accounting:write)
+POST /api/v1/purchase-orders/{po_id}/accounting/accrual       {"entry_date":"2026-10-31",
+                                                               "allocations":[{"line_no":1,
+                                                                               "cost_center_code":"CC-100",
+                                                                               "unit_number":"APT-12"}]}
+#    D 110100 inventory / C 110200 GR-IR at PO cost; only the not-yet-accrued increment
+
+# 4. journal entries: draft → post → reverse (accounting:write / accounting:post / accounting:reverse)
+GET  /api/v1/accounting/journal-entries?status=draft&source_type=receipt_accrual
+POST /api/v1/accounting/journal-entries                       # manual entry (needs source_type="manual")
+GET  /api/v1/accounting/journal-entries/{entry_id}
+POST /api/v1/accounting/journal-entries/{entry_id}/post       # a human holding accounting:post
+POST /api/v1/accounting/journal-entries/{entry_id}/reverse    {"reason":"Duplicate receipt accrual"}
+
+# 5. the invoice posting — the three gates live here
+POST /api/v1/invoices/{invoice_id}/posting                    {"entry_date":"2026-10-31",
+                                                               "allocations":[{"line_no":1,"cost_center_code":"CC-100"}]}
+POST /api/v1/invoices/{invoice_id}/payment-posting            {"payment_id":"…"}
+#    422 match_not_clean → the invoice disagrees with the GR
+#    422 invoice_not_approved → finance has not approved it
+#    422 audit_review_required → the package is not accepted
+#    409 duplicate_posting → an entry already exists for this invoice
+
+# 6. reports (cost:read / accounting:read / ledger:read)
+GET  /api/v1/accounting/trial-balance?as_of=2026-10-31
+GET  /api/v1/accounting/cost-report?group_by=cost_center   # cost_center|item|unit|supplier|purchase_order
+GET  /api/v1/purchase-orders/{po_id}/accounting            # every entry + cost split for one order
+GET  /api/v1/accounting/supplier-account/{supplier_id}     # movements, ledger entries, outstanding
+```
+
+**Posting rules.** A receipt accrual debits inventory (`110100`) against GR/IR (`110200`) per line.
+An invoice posting clears GR/IR at *PO* cost and books the difference to price variance (`530100`)
+when an accrual exists, or debits inventory directly when it does not; VAT input (`120100`) is booked
+when the invoice carries tax and accounts payable (`210100`) is credited at the invoice total. A
+payment posting debits AP and credits bank (`100100`). System accounts are exempt from the
+cost-centre requirement; every inventory or expense debit needs one (`missing_cost_center`).
+
+**Immutability.** `journal_entry` rows are editable only while `draft`. `journal_line`,
+`cost_allocation` and `p2p_stage_event` are append-only at the database level (`REVOKE UPDATE,
+DELETE`), so a posted number cannot be rewritten behind the API — corrections are reversals.
+
+**Error codes** (RFC 9457 `code`): `empty_entry`, `unknown_account`, `unbalanced` (with both totals),
+`unknown_cost_center`, `missing_cost_center`, `duplicate_accrual`, `no_confirmed_receipt`,
+`invoice_not_approved`, `match_not_clean`, `audit_review_required`, `segregation_of_duties`,
+`already_posted`, `already_reversed`, `reversal_reason_required`.
+
 ## Endpoint inventory
 
 The table below is generated from the live OpenAPI schema of the running application
-(158 operations).
+(182 operations).
 
 | Method | Path | Summary | Tag |
 | --- | --- | --- | --- |
+| GET | `/api/v1/accounting/accounts` | Chart of accounts | accounting |
+| POST | `/api/v1/accounting/accounts` | Add a GL account | accounting |
+| PATCH | `/api/v1/accounting/accounts/{code}` | Rename or deactivate a GL account | accounting |
+| GET | `/api/v1/accounting/cost-centers` | Cost centres (analytical dimension) | accounting |
+| POST | `/api/v1/accounting/cost-centers` | Create a cost centre | accounting |
+| PATCH | `/api/v1/accounting/cost-centers/{code}` | Update a cost centre | accounting |
+| GET | `/api/v1/accounting/cost-report` | Posted cost by cost centre, item, unit or supplier | accounting |
+| GET | `/api/v1/accounting/coverage` | Is the tenant's accounting set up? | accounting |
+| GET | `/api/v1/accounting/journal-entries` | Journal entries with filters | accounting |
+| POST | `/api/v1/accounting/journal-entries` | Draft a manual journal entry | accounting |
+| GET | `/api/v1/accounting/journal-entries/{entry_id}` | Journal entry detail | accounting |
+| POST | `/api/v1/accounting/journal-entries/{entry_id}/post` | Post a draft to the ledger | accounting |
+| POST | `/api/v1/accounting/journal-entries/{entry_id}/reverse` | Reverse a posted entry | accounting |
+| GET | `/api/v1/accounting/supplier-account/{supplier_id}` | Supplier sub-ledger with journal support | accounting |
+| GET | `/api/v1/accounting/trial-balance` | Trial balance over posted entries | accounting |
 | GET | `/api/v1/agent-runs` | Agent activity feed (prompt/tool/reasoning audit) | admin |
 | GET | `/api/v1/agent-runs/{run_id}` | Agent run detail with steps and tool calls | admin |
 | POST | `/api/v1/agent/run` | Run the orchestration graph (stops at human-interrupt nodes) | admin |
@@ -157,11 +243,12 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/approvals/{approval_id}/decide` | Approve / reject / request revision / split award | rfq |
 | POST | `/api/v1/approvals/{approval_id}/delegate` | Delegate an approval | rfq |
 | GET | `/api/v1/audit` | Append-only audit trail | admin |
+| POST | `/api/v1/audit-packages/{package_id}/review` | Auditor accepts the evidence or raises a query | accounting |
 | POST | `/api/v1/auth/change-password` | Change password (enforces the password policy) | identity |
 | POST | `/api/v1/auth/login` | Email + password sign-in (TOTP challenge when enabled) | identity |
 | POST | `/api/v1/auth/logout` | Revoke the current refresh session | identity |
 | GET | `/api/v1/auth/me` | Current user, tenant, permissions and preferences | identity |
-| PATCH | `/api/v1/auth/me` | Update profile and preferences (locale, currency, name) | identity |
+| PATCH | `/api/v1/auth/me` | Update profile and preferences (locale, currency, contacts) | identity |
 | POST | `/api/v1/auth/mfa/disable` | Disable MFA (requires a valid code) | identity |
 | POST | `/api/v1/auth/mfa/enable` | Confirm TOTP enrolment (returns one-time backup codes) | identity |
 | POST | `/api/v1/auth/mfa/setup` | Start TOTP enrolment (returns otpauth URI + secret) | identity |
@@ -206,7 +293,9 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/integrations/{kind}/test` | Test an integration | admin |
 | POST | `/api/v1/invoices/{invoice_id}/approve` | Human approval of a matched invoice | orders |
 | POST | `/api/v1/invoices/{invoice_id}/match` | Re-run the three-way match | orders |
+| POST | `/api/v1/invoices/{invoice_id}/payment-posting` | Draft the AP settlement for a recorded payment | accounting |
 | POST | `/api/v1/invoices/{invoice_id}/payments` | Record a payment executed outside the platform | orders |
+| POST | `/api/v1/invoices/{invoice_id}/posting` | Draft the invoice posting (GR/IR clearing, VAT, variance, payable) | accounting |
 | GET | `/api/v1/limits` | Approval limits per role and category (FR-AUTH-3) | identity |
 | POST | `/api/v1/limits` | Upsert an approval limit | identity |
 | GET | `/api/v1/llm-config` | Per-tenant LLM provider (including self-hosted) | admin |
@@ -230,11 +319,16 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/public/supplier/{token}` | Supplier profile confirmation / catalogue upload | admin |
 | GET | `/api/v1/purchase-orders` | List purchase orders | orders |
 | GET | `/api/v1/purchase-orders/{po_id}` | Purchase order detail with the delivery lifecycle | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/accounting` | Postings and cost allocation for an order | accounting |
+| POST | `/api/v1/purchase-orders/{po_id}/accounting/accrual` | Draft the GR/IR accrual for a confirmed receipt | accounting |
+| GET | `/api/v1/purchase-orders/{po_id}/audit-package` | Current auditor package (if any) | accounting |
+| POST | `/api/v1/purchase-orders/{po_id}/audit-package` | Assemble and seal the auditor package | accounting |
 | POST | `/api/v1/purchase-orders/{po_id}/close` | Close a fully confirmed purchase order | orders |
 | GET | `/api/v1/purchase-orders/{po_id}/excel` | Download the PO as Excel | orders |
 | POST | `/api/v1/purchase-orders/{po_id}/export-erp` | Push the PO to the ERP connector | orders |
 | GET | `/api/v1/purchase-orders/{po_id}/invoices` | Supplier invoices for a purchase order | orders |
 | POST | `/api/v1/purchase-orders/{po_id}/invoices` | Record a supplier invoice and run the three-way match | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/lifecycle` | Eleven-stage purchase-to-pay status | accounting |
 | GET | `/api/v1/purchase-orders/{po_id}/pdf` | Download the PO as PDF | orders |
 | GET | `/api/v1/purchase-orders/{po_id}/receipts` | Goods receipts for a purchase order | orders |
 | POST | `/api/v1/purchase-orders/{po_id}/receipts` | Record a goods receipt at the warehouse | orders |
@@ -242,6 +336,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/receipts/{receipt_id}/confirm` | Requester confirms the received items match the need | orders |
 | GET | `/api/v1/requests` | List purchase requisitions | intake |
 | GET | `/api/v1/requests/{pr_id}` | Requisition detail with lines and open questions | intake |
+| POST | `/api/v1/requests/{pr_id}/assign` | Route a requisition to a procurement owner | intake |
 | POST | `/api/v1/requests/{pr_id}/clarifications/{question_id}/answer` | Answer or waive a clarification | intake |
 | POST | `/api/v1/requests/{pr_id}/lines/{line_id}/normalize` | Confirm/correct item normalization | intake |
 | POST | `/api/v1/requests/{pr_id}/submit` | Mark a requisition ready for RFQ creation | intake |

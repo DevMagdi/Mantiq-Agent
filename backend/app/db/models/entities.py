@@ -272,9 +272,15 @@ class PurchaseRequisition(Base, UUIDMixin, AuditMixin, TenantMixin):
     code: Mapped[str] = mapped_column(String(40), index=True)
     title: Mapped[str] = mapped_column(String(240))
     source: Mapped[str] = mapped_column(String(24), default="manual")  # excel|text|voice|ocr|email|erp|manual
-    status: Mapped[str] = mapped_column(String(24), default="draft")  # draft|clarifying|ready|rfq_created|cancelled
+    # draft|clarifying|ready|in_procurement|rfq_created|cancelled
+    status: Mapped[str] = mapped_column(String(24), default="draft")
     plant_id: Mapped[str | None] = mapped_column(String(36))
     requested_by: Mapped[str | None] = mapped_column(String(36))
+    # Ownership: the requesting department owns the need, procurement owns the process. Routing a
+    # requisition to a named buyer is a human act and is what moves it into procurement.
+    department: Mapped[str] = mapped_column(String(120), default="")
+    assigned_to: Mapped[str | None] = mapped_column(String(36), index=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     needed_by: Mapped[datetime | None] = mapped_column(UTCDateTime)
     currency: Mapped[str] = mapped_column(String(3), default="EGP")
     total_estimate: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
@@ -769,6 +775,143 @@ class SupplierLedgerEntry(Base, UUIDMixin, TimestampMixin):
     reference: Mapped[str] = mapped_column(String(120), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[str | None] = mapped_column(String(36))
+
+
+# =====================================================================  accounting
+# The books are a controlled append-only ledger: a journal entry is drafted, then posted by a named
+# human holding `accounting:post`. Nothing in the AI layer can write to these tables, and a posted
+# entry can only be corrected by a linked reversal — never by an update.
+class GLAccount(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """One line of the tenant's chart of accounts (code is the join key used by journal lines)."""
+
+    __tablename__ = "gl_account"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_gl_account_tenant_code"),)
+    code: Mapped[str] = mapped_column(String(20), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    name_ar: Mapped[str] = mapped_column(String(160), default="")
+    # asset | liability | equity | revenue | expense
+    kind: Mapped[str] = mapped_column(String(16))
+    normal_balance: Mapped[str] = mapped_column(String(6), default="debit")  # debit | credit
+    parent_code: Mapped[str | None] = mapped_column(String(20))
+    is_control: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
+class CostCenter(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """Analytical dimension #1. The unit number on a journal line is dimension #2."""
+
+    __tablename__ = "cost_center"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_cost_center_tenant_code"),)
+    code: Mapped[str] = mapped_column(String(20), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    name_ar: Mapped[str] = mapped_column(String(160), default="")
+    plant_id: Mapped[str | None] = mapped_column(String(36))
+    manager_id: Mapped[str | None] = mapped_column(String(36))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
+class JournalEntry(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """A double-entry header. ``total_debit == total_credit`` is enforced before posting."""
+
+    __tablename__ = "journal_entry"
+    __table_args__ = (UniqueConstraint("tenant_id", "number", name="uq_journal_entry_number"),)
+    number: Mapped[str] = mapped_column(String(40), index=True)  # JE-YYYY-NNNNN
+    entry_date: Mapped[datetime] = mapped_column(UTCDateTime, default=lambda: datetime.now(UTC))
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    memo: Mapped[str] = mapped_column(String(400), default="")
+    memo_ar: Mapped[str] = mapped_column(String(400), default="")
+    # draft | posted | reversed
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)
+    # receipt_accrual | invoice | payment | accrual_reversal | manual | reversal
+    source_type: Mapped[str] = mapped_column(String(24), default="manual", index=True)
+    source_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    po_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    receipt_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    match_snapshot: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    total_debit: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    total_credit: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    posted_by: Mapped[str | None] = mapped_column(String(36))
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reversal_of: Mapped[str | None] = mapped_column(String(36), index=True)
+    reversed_by: Mapped[str | None] = mapped_column(String(36))
+    reversal_reason: Mapped[str] = mapped_column(Text, default="")
+    lines: Mapped[list] = mapped_column(JSONVariant, default=list)
+
+
+class JournalLine(Base, UUIDMixin, TimestampMixin):
+    """A ledger line, denormalised for reporting; ``journal_entry.lines`` keeps the audited copy."""
+
+    __tablename__ = "journal_line"
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    entry_id: Mapped[str] = mapped_column(String(36), index=True)
+    line_no: Mapped[int] = mapped_column(Integer, default=1)
+    account_code: Mapped[str] = mapped_column(String(20), index=True)
+    description: Mapped[str] = mapped_column(String(400), default="")
+    debit: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    credit: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    cost_center_code: Mapped[str | None] = mapped_column(String(20), index=True)
+    unit_number: Mapped[str | None] = mapped_column(String(40), index=True)
+    item_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    supplier_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+
+class CostAllocation(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """Analytical fact: which cost centre, unit and product a posted procurement cost landed on."""
+
+    __tablename__ = "cost_allocation"
+    journal_entry_id: Mapped[str] = mapped_column(String(36), index=True)
+    po_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    receipt_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    line_no: Mapped[int] = mapped_column(Integer, default=1)
+    description: Mapped[str] = mapped_column(String(400), default="")
+    cost_center_code: Mapped[str] = mapped_column(String(20), index=True)
+    unit_number: Mapped[str | None] = mapped_column(String(40), index=True)
+    item_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    amount: Mapped[Decimal] = mapped_column(money(), default=Decimal("0"))
+    quantity: Mapped[Decimal] = mapped_column(qty(), default=Decimal("0"))
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    entry_date: Mapped[datetime] = mapped_column(UTCDateTime, default=lambda: datetime.now(UTC))
+
+
+class AuditPackage(Base, UUIDMixin, AuditMixin, TenantMixin):
+    """The auditor's bundle: GRN + PO + approvals + invoice + match + postings, hash-sealed."""
+
+    __tablename__ = "audit_package"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_audit_package_code"),)
+    code: Mapped[str] = mapped_column(String(40), index=True)
+    po_id: Mapped[str] = mapped_column(String(36), index=True)
+    invoice_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    # assembled | reviewed | queried (the auditor asked a question, so the flow waits)
+    status: Mapped[str] = mapped_column(String(16), default="assembled")
+    components: Mapped[list] = mapped_column(JSONVariant, default=list)
+    manifest_hash: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[dict] = mapped_column(JSONVariant, default=dict)
+    generated_by: Mapped[str | None] = mapped_column(String(36))
+    generated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reviewer_id: Mapped[str | None] = mapped_column(String(36))
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    decision: Mapped[str | None] = mapped_column(String(16))  # accepted | queried
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class P2PStageEvent(Base, UUIDMixin, TimestampMixin):
+    """Append-only record of when a purchase-to-pay stage was first reached, and by whom."""
+
+    __tablename__ = "p2p_stage_event"
+    __table_args__ = (UniqueConstraint("tenant_id", "po_id", "stage", name="uq_p2p_stage_event"),)
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    po_id: Mapped[str] = mapped_column(String(36), index=True)
+    rfq_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    stage: Mapped[str] = mapped_column(String(32), index=True)
+    reached_at: Mapped[datetime] = mapped_column(UTCDateTime, default=lambda: datetime.now(UTC))
+    actor_id: Mapped[str | None] = mapped_column(String(36))
+    source: Mapped[str] = mapped_column(String(40), default="")
+    evidence: Mapped[dict] = mapped_column(JSONVariant, default=dict)
 
 
 # =====================================================================  agents & audit

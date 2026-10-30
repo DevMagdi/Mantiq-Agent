@@ -107,6 +107,7 @@ async def test_chain_advances_step_by_step_then_awards_and_issues_a_purchase_ord
 
         manager = await _user(session, "manager@nile.example.com")
         finance = await _user(session, "finance@nile.example.com")
+        auditor = await _user(session, "auditor@nile.example.com")
 
         first = await approval_service.decide(session, tenant, rows[0], decision="approve",
                                              comment="Within budget", user=manager)
@@ -116,8 +117,16 @@ async def test_chain_advances_step_by_step_then_awards_and_issues_a_purchase_ord
         assert rows[1].status == "pending"
         assert not first.get("purchase_orders"), "no PO before the final level"
 
+        # Above the high-value band the auditor joins the chain: every step is decided in order.
+        approvers = {"procurement_manager": manager, "finance_approver": finance, "auditor": auditor}
+        for row in rows[1:-1]:
+            row.status = "pending"
+            step = await approval_service.decide(session, tenant, row, decision="approve",
+                                                 comment="Checked", user=approvers[row.approver_role])
+            assert step["ok"] is True and not step.get("purchase_orders")
+        rows[-1].status = "pending"
         last = await approval_service.decide(session, tenant, rows[-1], decision="approve",
-                                             comment="Cash confirmed", user=finance)
+                                             comment="Cash confirmed", user=approvers[rows[-1].approver_role])
         assert last["ok"] is True
         assert last["next_step"] is None
         assert last["purchase_orders"], "final approval must issue the purchase order"

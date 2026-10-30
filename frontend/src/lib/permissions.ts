@@ -27,6 +27,15 @@ export const PERM = {
   invoiceApprove: "invoice:approve",
   paymentRecord: "payment:record",
   ledgerRead: "ledger:read",
+  // accounting & analytics (phase 2)
+  accountingRead: "accounting:read",
+  accountingWrite: "accounting:write",
+  accountingPost: "accounting:post",
+  accountingReverse: "accounting:reverse",
+  costRead: "cost:read",
+  costWrite: "cost:write",
+  auditPackageRead: "audit_package:read",
+  auditPackageReview: "audit_package:review",
   // reporting & admin
   reportRead: "report:read",
   settingsRead: "settings:read",

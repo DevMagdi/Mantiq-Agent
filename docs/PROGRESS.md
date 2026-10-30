@@ -1,18 +1,19 @@
 # Build progress — honest status
 
-Updated: 2026-10-30. This file exists so nobody has to guess what works. Each row says what is
+Updated: 2026-10-31 (phase 2). This file exists so nobody has to guess what works. Each row says what is
 implemented, what is proven by a test, and what genuinely does not exist yet.
 
-Verification commands used for this snapshot (real output in `docs/PR_DESCRIPTION.md`):
+Verification commands behind this snapshot. The first, second and last three run locally on SQLite /
+Node; the PostgreSQL row runs in CI (job `postgres`), because the sandbox has no PostgreSQL with
+`pgcrypto`. Real output for the local rows is pasted in `docs/PR_PHASE2.md`.
 
 ```bash
-cd backend && pytest tests -q --cov=app        # 524 tests, 0 failures, 85% coverage
-cd backend && ruff check app tests             # clean
-export DATABASE_URL=postgresql+asyncpg://procureai:change-me@localhost:5432/procureai
-cd backend && alembic upgrade head && alembic check     # on PostgreSQL 16, not SQLite
-python scripts/verify_rls.py                   # 6/6 isolation guarantees
-python scripts/load_test.py --users 50 --duration 60    # PASS, see docs/LOAD_TEST.md
-cd frontend && npm run typecheck && npm run lint && npm run test && npm run build
+cd backend && pytest tests                     # 583 tests, 0 failures   (local, SQLite)
+cd backend && ruff check app tests             # clean                    (local)
+cd backend && alembic upgrade head && alembic check     # fresh PostgreSQL 16 (CI job postgres)
+python scripts/verify_rls.py                   # 19 guarantees: 6 original + 13 phase-2 (CI job postgres)
+python scripts/load_test.py --users 50 --duration 60    # PASS, see docs/LOAD_TEST.md (local, needs Redis stack)
+cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest run && npm run build
 ```
 
 ## Implemented and tested
@@ -44,13 +45,23 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 60 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 18 pages across 20 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 66 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
 | Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
-| PostgreSQL verification | Migration chain `0001→0014`, `alembic check`, 60 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6/6), CI job `postgres` |
+| PostgreSQL verification | Migration chain `0001→0015`, `alembic check`, 67 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6 + 13), CI job `postgres` |
 | Load | 50 concurrent role-based sessions (reads + WebSockets): 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors; found and fixed a PII-decryption 500 and a hot-loop in the harness | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
+| P2P status machine | The eleven stages (requested → in procurement → RFQ sent → offers received → under approval → PO issued → pending receipt → received → confirmed → ready for audit → posted to accounts) derived from the documents, with an append-only transition history and a bilingual rail | `app/services/p2p.py`, `tests/test_services_p2p.py` (17), `tests/test_api_p2p_accounting_e2e.py` |
+| Requisition routing | The requesting department creates the need; `POST /requests/{id}/assign` routes it to a named buyer and moves it to `in_procurement` | `app/api/v1/intake.py`, `tests/test_api_p2p_accounting_e2e.py` |
+| Auditor document package | Assembled automatically when the requester confirms the delivery: GRN, awarded offer, PO, full approval record, invoice, match result and postings, each SHA-256 hashed and sealed into a manifest that is re-verified on every read | `app/services/audit_package.py`, `tests/test_services_p2p.py`, `tests/test_api_accounting.py` |
+| Accounting core | Chart of accounts, cost centres, double-entry journal entries (draft → posted → reversed), manual entries with two-person control, trial balance | `app/services/accounting.py`, `tests/test_services_accounting.py` (24), `tests/test_api_accounting.py` (15) |
+| Automatic postings | GR/IR accrual at PO cost on confirmation, invoice posting with GR/IR clearing or direct inventory, VAT input, price variance, AP accrual, payment settlement | `draft_receipt_accrual`, `draft_invoice_posting`, `draft_payment_posting`, `tests/test_services_accounting.py` (exact amounts) |
+| Posting controls | `match_not_clean` / `invoice_not_approved` / `audit_review_required` gates, segregation of duties on manual entries, immutable postings, reversal with a mandatory reason | `tests/test_api_p2p_accounting_e2e.py`, `tests/test_api_accounting.py` |
+| Cost & analytical accounting | Every inventory/expense debit carries a cost centre, an optional unit number and an item; a `cost_allocation` fact is written on posting; reports by cost centre, item, unit, supplier and order | `accounting.cost_report`, `tests/test_services_accounting.py`, `tests/test_api_accounting.py` |
+| Supplier sub-ledger | Invoices, payments and their journal support per supplier with a live payable balance | `accounting.supplier_account`, `GET /accounting/supplier-account/{id}` |
+| Accounting screens | Journal list + entry drawer (post/reverse with reason), chart of accounts & cost centres, trial balance / cost analysis / supplier balances, PO accounting panel and audit-package review — all bilingual with permission gating | `frontend/src/pages/JournalPage.tsx`, `AccountingReportsPage.tsx`, `AccountingSetupPage.tsx`, `components/{P2PRail,PostingsCard,AuditPackageCard}.tsx`, `frontend/src/pages/accounting.test.tsx` (6) |
+| Phase-2 RBAC | `controller` (draft/post/reverse + cost master data) and `auditor` (read-only money + package review), neither able to approve a purchase; UI matrix mirrored and asserted | `app/core/rbac.py`, `tests/test_frontend_permissions.py` |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox
 

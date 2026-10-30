@@ -25,7 +25,7 @@ from app.db.models.entities import (
     SupplierLedgerEntry,
     Tenant,
 )
-from app.services import numbers
+from app.services import numbers, p2p
 from app.services.common import notify, notify_role
 from app.services.receiving import EPOCH, po_lines, received_totals
 
@@ -378,6 +378,9 @@ async def approve_invoice(session: AsyncSession, tenant: Tenant, invoice: Suppli
                       body=f"{numbers.fmt_amount(outstanding, invoice.currency, 'en')} via "
                            f"{suggestion.get('method_label_en', 'bank transfer')}",
                       link=f"/purchase-orders/{invoice.po_id}", severity="warning")
+    if po is not None:
+        # Keeps the stage history aligned with the documents; approval alone never advances it.
+        await p2p.touch(session, tenant.id, po, actor_id=approved_by, source="invoice_approved")
     return {"ok": True, "invoice_id": invoice.id, "status": invoice.status, "match": match,
             "payment_suggestion": suggestion, "overridden": bool(override_reason.strip())}
 
