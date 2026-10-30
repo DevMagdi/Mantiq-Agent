@@ -73,7 +73,7 @@ def user_payload(user: User, tenant: Tenant) -> dict:
         "id": user.id, "email": user.email, "full_name": user.full_name, "full_name_ar": user.full_name_ar,
         "roles": list(user.roles or []), "is_superadmin": user.is_superadmin,
         "must_change_password": user.must_change_password, "mfa_enabled": user.mfa_enabled,
-        "locale": user.locale, "theme": user.theme, "numerals": user.numerals,
+        "locale": user.locale,
         "preferred_currency": user.preferred_currency, "phone": user.phone, "job_title": user.job_title,
         "tenant": {"id": tenant.id, "name": tenant.name, "slug": tenant.slug, "locale": tenant.locale,
                    "timezone": tenant.timezone, "currency": tenant.currency, "plan": tenant.plan_code,

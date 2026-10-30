@@ -42,7 +42,8 @@ type DashboardPayload = {
   generated_at?: string;
 };
 
-const CHART_COLORS = ["var(--gold)", "#4f8cc9", "#7fb069", "#c96f4f", "#8f7fc9", "#c9a227"];
+/* Navy + gold only: shades of the brand plus the four semantic status colours. */
+const CHART_COLORS = ["var(--gold)", "var(--gold-300)", "var(--info)", "var(--navy-700)", "var(--ok)", "var(--warn)"];
 
 export default function DashboardPage() {
   const { t, i18n } = useTranslation();
@@ -141,7 +142,7 @@ export default function DashboardPage() {
               <p className="mt-1">
                 {`${money(kpis.savings.initial, "EGP", lang)} → ${money(kpis.savings.final, "EGP", lang)}`}
               </p>
-              <p className="mt-1 text-[color:var(--ok)]">{`${percent(kpis.savings.savings_pct)} ${t("dashboard.savingsTitle")}`}</p>
+              <p className="mt-1 text-[color:var(--ok-ink)]">{`${percent(kpis.savings.savings_pct)} ${t("dashboard.savingsTitle")}`}</p>
             </div>
           </div>
         </Card>

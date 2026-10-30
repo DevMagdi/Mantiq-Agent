@@ -11,37 +11,20 @@ type AuthState = {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   can: (permission: string) => boolean;
-  setTheme: (theme: "dark" | "light") => void;
-  theme: "dark" | "light";
 };
 
 const AuthContext = createContext<AuthState | null>(null);
-
-const THEME_KEY = "procureai.theme";
-
-function applyTheme(theme: "dark" | "light") {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem(THEME_KEY, theme);
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [status, setStatus] = useState<AuthState["status"]>("loading");
   const [challenge, setChallenge] = useState<string | null>(null);
-  const [theme, setThemeState] = useState<"dark" | "light">(
-    (localStorage.getItem(THEME_KEY) as "dark" | "light" | null) ?? "dark",
-  );
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
 
   const refreshUser = useCallback(async () => {
     try {
       const me = await api.get<User>("/api/v1/auth/me");
       setUser(me);
       setStatus("authenticated");
-      if (me.theme === "light" || me.theme === "dark") setThemeState(me.theme);
     } catch {
       setUser(null);
       setStatus("anonymous");
@@ -98,14 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
-  const setTheme = useCallback((next: "dark" | "light") => {
-    setThemeState(next);
-    void api.patch("/api/v1/auth/me", { theme: next }).catch(() => undefined);
-  }, []);
-
   const value = useMemo<AuthState>(
-    () => ({ user, status, challenge, login, verifyMfa, logout, refreshUser, can, theme, setTheme }),
-    [user, status, challenge, login, verifyMfa, logout, refreshUser, can, theme, setTheme],
+    () => ({ user, status, challenge, login, verifyMfa, logout, refreshUser, can }),
+    [user, status, challenge, login, verifyMfa, logout, refreshUser, can],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

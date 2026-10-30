@@ -30,7 +30,7 @@ type TrendsPayload = { items: { period: string; avg_price: number; samples: numb
 type ForecastPayload = { points: { period: number; forecast: number; lower: number; upper: number }[]; method: string; based_on: number };
 type SavingsPayload = { items: { name: string; orders: number; amount: string }[] };
 
-const COLORS = ["var(--gold)", "#4f8cc9", "#7fb069", "#c96f4f", "#8f7fc9"];
+const COLORS = ["var(--gold)", "var(--gold-300)", "var(--info)", "var(--navy-700)", "var(--ok)"];
 
 export default function AnalyticsPage() {
   const { t, i18n } = useTranslation();
@@ -175,7 +175,7 @@ export default function AnalyticsPage() {
                   <td className="text-sm">{row.name}</td>
                   <td className="text-end tabular text-sm">{num(row.orders, lang)}</td>
                   <td className="text-end tabular text-sm">{money(row.amount, "EGP", lang)}</td>
-                  <td className="text-end tabular text-sm text-[color:var(--ok)]">{percent(Number(row.amount) > 0 ? 12.5 : 0)}</td>
+                  <td className="text-end tabular text-sm text-[color:var(--ok-ink)]">{percent(Number(row.amount) > 0 ? 12.5 : 0)}</td>
                 </tr>
               ))}
               {(savings.data?.items ?? []).length === 0 ? (

@@ -132,7 +132,7 @@ export default function ActivityPage() {
                 {(detail.data.steps ?? []).map((step) => (
                   <li key={step.id} className="flex items-center justify-between rounded border border-line px-2 py-1 text-xs">
                     <span className="flex items-center gap-2">
-                      <CheckCircle2 className="size-3 text-[color:var(--ok)]" aria-hidden />
+                      <CheckCircle2 className="size-3 text-[color:var(--ok-ink)]" aria-hidden />
                       {step.step_no}. {step.node}
                     </span>
                     <span className="text-2xs text-ink-subtle">{num(step.latency_ms ?? 0, lang)} ms</span>

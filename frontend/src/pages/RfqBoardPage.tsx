@@ -318,7 +318,7 @@ function NewRfqDrawer({
               </option>
             ))}
           </select>
-          {ready.length === 0 ? <p className="mt-1 text-2xs text-[color:var(--warn)]">{t("requests.submitForRfq")}</p> : null}
+          {ready.length === 0 ? <p className="mt-1 text-2xs text-[color:var(--warn-ink)]">{t("requests.submitForRfq")}</p> : null}
         </div>
         <div>
           <label className="label" htmlFor="title">
@@ -369,7 +369,7 @@ function NewRfqDrawer({
           </div>
         </div>
         {error ? (
-          <p role="alert" className="text-sm text-[color:var(--danger)]">
+          <p role="alert" className="text-sm text-[color:var(--danger-ink)]">
             {error}
           </p>
         ) : null}

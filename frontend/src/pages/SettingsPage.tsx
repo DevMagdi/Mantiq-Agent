@@ -305,7 +305,7 @@ function ApiKeys({ lang }: { lang: AppLang }) {
                   <td className="text-2xs">{date(key.created_at, lang)}</td>
                   <td>
                     {key.revoked_at ? null : (
-                      <button type="button" className="btn-ghost text-2xs text-[color:var(--danger)]" onClick={() => void revoke(key.id)}>
+                      <button type="button" className="btn-ghost text-2xs text-[color:var(--danger-ink)]" onClick={() => void revoke(key.id)}>
                         {t("common.cancel")}
                       </button>
                     )}

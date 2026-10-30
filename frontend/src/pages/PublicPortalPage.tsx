@@ -110,9 +110,9 @@ export default function PublicPortalPage() {
                 </div>
               ) : null}
 
-              {error ? <p role="alert" className="mt-3 text-sm text-[color:var(--danger)]">{error}</p> : null}
+              {error ? <p role="alert" className="mt-3 text-sm text-[color:var(--danger-ink)]">{error}</p> : null}
               {saved ? (
-                <p className="mt-3 flex items-center gap-1.5 text-sm text-[color:var(--ok)]">
+                <p className="mt-3 flex items-center gap-1.5 text-sm text-[color:var(--ok-ink)]">
                   <CheckCircle2 className="size-4" aria-hidden /> {t("publicPortal.pending")}
                 </p>
               ) : null}

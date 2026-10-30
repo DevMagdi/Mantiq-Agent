@@ -107,7 +107,7 @@ export default function LoginPage() {
                 />
               </div>
               {error ? (
-                <p role="alert" className="text-sm text-[color:var(--danger)]">
+                <p role="alert" className="text-sm text-[color:var(--danger-ink)]">
                   {error}
                 </p>
               ) : null}
@@ -149,7 +149,7 @@ export default function LoginPage() {
                 />
               </div>
               {error ? (
-                <p role="alert" className="text-sm text-[color:var(--danger)]">
+                <p role="alert" className="text-sm text-[color:var(--danger-ink)]">
                   {error}
                 </p>
               ) : null}

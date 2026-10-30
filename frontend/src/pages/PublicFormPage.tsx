@@ -64,7 +64,7 @@ export default function PublicFormPage() {
           <Card><ErrorState message={errorMessage(form.error)} /></Card>
         ) : done ? (
           <Card className="p-8 text-center">
-            <CheckCircle2 className="mx-auto size-10 text-[color:var(--ok)]" aria-hidden />
+            <CheckCircle2 className="mx-auto size-10 text-[color:var(--ok-ink)]" aria-hidden />
             <h1 className="mt-3 text-lg font-semibold">{t("publicForm.success")}</h1>
             <p className="mt-1 text-sm text-ink-muted">{form.data?.supplier.name}</p>
           </Card>
@@ -153,7 +153,7 @@ export default function PublicFormPage() {
                 <textarea id="notes" className="input min-h-20" value={header.notes} onChange={(event) => setHeader({ ...header, notes: event.target.value })} />
               </div>
               {error ? (
-                <p role="alert" className="sm:col-span-2 text-sm text-[color:var(--danger)]">{error}</p>
+                <p role="alert" className="sm:col-span-2 text-sm text-[color:var(--danger-ink)]">{error}</p>
               ) : null}
               <div className="sm:col-span-2 flex items-center justify-between">
                 <p className="flex items-center gap-1.5 text-2xs text-ink-subtle">

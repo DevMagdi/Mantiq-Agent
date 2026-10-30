@@ -249,7 +249,7 @@ function IntakeDrawer({ open, onClose, onCreated }: { open: boolean; onClose: ()
           </div>
         </div>
         {error ? (
-          <p role="alert" className="text-sm text-[color:var(--danger)]">
+          <p role="alert" className="text-sm text-[color:var(--danger-ink)]">
             {error}
           </p>
         ) : null}
