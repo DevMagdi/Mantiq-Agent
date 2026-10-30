@@ -90,7 +90,8 @@ export function useRealtime(onEvent: (event: RealtimeEvent) => void): boolean {
         if (closed) return;
         // 4401/4403: the token is invalid or expired. Retry only once a new token exists.
         if (event.code === 4401 || event.code === 4403) {
-          setTimeout(() => {
+          // Tracked in `retry` so unmount cancels it: no stray reconnect after the tab is gone.
+          retry = setTimeout(() => {
             if (!closed && session.get() !== token) connect();
           }, 5_000);
           return;

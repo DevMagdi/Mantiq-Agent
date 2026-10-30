@@ -30,6 +30,7 @@ export const PERM = {
   // reporting & admin
   reportRead: "report:read",
   settingsRead: "settings:read",
+  settingsUpdate: "settings:update",
   adminIntegrations: "admin:integrations",
   adminApiKeys: "admin:api_keys",
   adminLlm: "admin:llm",
