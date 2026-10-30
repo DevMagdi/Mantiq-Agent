@@ -16,6 +16,9 @@ import {
 } from "recharts";
 import { PageHeading } from "@/components/Shell";
 import { Card, CardHeader, EmptyState, ErrorState, Kpi, LoadingBlock, StatusChip, Progress } from "@/components/ui";
+import { RestrictedPanel } from "@/components/Guard";
+import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import { api, errorMessage } from "@/lib/api";
 import { compact, date, money, num, percent, relative } from "@/lib/format";
 import type { AppLang } from "@/i18n";
@@ -52,13 +55,20 @@ export default function DashboardPage() {
     queryKey: ["dashboard"],
     queryFn: () => api.get<DashboardPayload>("/api/v1/dashboard"),
   });
+  const { can } = useAuth();
+  // Never call an endpoint the signed-in role cannot use: a `requester` has no audit or approval
+  // permission, and firing these produced a wall of 403s in the console on every login.
+  const canReadAgents = can(PERM.auditRead);
+  const canReadApprovals = can(PERM.approvalRead);
   const runs = useQuery({
     queryKey: ["agent-runs"],
     queryFn: () => api.get<Page<AgentRun>>("/api/v1/agent-runs?page_size=8"),
+    enabled: canReadAgents,
   });
   const approvals = useQuery({
     queryKey: ["approvals", "dashboard"],
     queryFn: () => api.get<Page<Approval>>("/api/v1/approvals?status=pending"),
+    enabled: canReadApprovals,
   });
 
   if (isLoading) return <LoadingBlock rows={8} />;
@@ -248,11 +258,16 @@ export default function DashboardPage() {
           <CardHeader
             title={t("dashboard.activity")}
             action={
-              <Link to="/activity" className="text-2xs text-gold hover:underline">
-                {t("dashboard.viewAll")}
-              </Link>
+              canReadAgents ? (
+                <Link to="/activity" className="text-2xs text-gold hover:underline">
+                  {t("dashboard.viewAll")}
+                </Link>
+              ) : null
             }
           />
+          {!canReadAgents ? (
+            <RestrictedPanel title={t("access.auditTitle")} permission={PERM.auditRead} />
+          ) : (
           <div className="divide-y divide-line/60">
             {(runs.data?.items ?? []).slice(0, 6).map((run) => (
               <div key={run.id} className="flex items-start gap-3 px-4 py-2.5">
@@ -266,17 +281,23 @@ export default function DashboardPage() {
             ))}
             {(runs.data?.items ?? []).length === 0 ? <EmptyState title={t("common.empty")} /> : null}
           </div>
+          )}
         </Card>
 
         <Card>
           <CardHeader
             title={t("approvals.title")}
             action={
-              <Link to="/approvals" className="text-2xs text-gold hover:underline">
-                {t("dashboard.viewAll")}
-              </Link>
+              canReadApprovals ? (
+                <Link to="/approvals" className="text-2xs text-gold hover:underline">
+                  {t("dashboard.viewAll")}
+                </Link>
+              ) : null
             }
           />
+          {!canReadApprovals ? (
+            <RestrictedPanel title={t("access.approvalsTitle")} permission={PERM.approvalRead} />
+          ) : (
           <div className="divide-y divide-line/60">
             {(approvals.data?.items ?? []).slice(0, 5).map((approval) => (
               <div key={approval.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
@@ -298,6 +319,7 @@ export default function DashboardPage() {
             ))}
             {(approvals.data?.items ?? []).length === 0 ? <EmptyState title={t("approvals.empty")} /> : null}
           </div>
+          )}
           <div className="border-t border-line px-4 py-2 text-end">
             <Link to="/analytics" className="inline-flex items-center gap-1 text-2xs text-gold hover:underline">
               {t("nav.analytics")} <ArrowUpRight className="size-3" aria-hidden />

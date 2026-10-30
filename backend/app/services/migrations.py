@@ -26,14 +26,19 @@ async def run_migrations(revision: str = "head") -> None:
     """Run migrations in a worker thread (Alembic is synchronous)."""
     import asyncio
 
-    if settings.database_url.startswith("sqlite") and settings.app_env == "test":
+    sqlite_fallback = settings.database_url.startswith("sqlite")
+    if sqlite_fallback and settings.app_env == "test":
         return
     try:
         await asyncio.to_thread(upgrade_sync, revision)
         log.info("migrations applied up to %s", revision)
     except Exception as exc:  # pragma: no cover - surfaced in logs, not fatal for liveness
-        log.warning("alembic upgrade failed (%s); falling back to metadata create for dev", exc)
-        if settings.app_env != "prod":
+        # `metadata.create_all` skips raw-SQL extras (RLS policies, extensions, triggers), so it is
+        # only ever a sandbox convenience on the documented SQLite fallback.
+        if settings.app_env != "prod" and (not sqlite_fallback or settings.allow_sqlite_fallback):
+            log.warning("alembic upgrade failed (%s); falling back to metadata create for dev", exc)
             from app.db.session import create_schema_dev_only
 
             await create_schema_dev_only()
+        else:
+            raise

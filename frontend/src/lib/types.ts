@@ -708,7 +708,8 @@ export type PurchaseOrderDetail = Omit<PurchaseOrderSummary, "lines"> & {
     outstanding_lines: number;
     short_delivery: boolean;
   };
-  supplier_balance: SupplierBalance;
+  /** Absent when the caller lacks `ledger:read`: commercial balances are financial data. */
+  supplier_balance?: SupplierBalance | null;
   next_status: PoStatus | null;
   can_close: boolean;
 };

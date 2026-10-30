@@ -42,7 +42,7 @@ async def _open_rfq(session, tenant) -> RFQ:
     )).scalars().first()
 
 
-async def _scene(session, *, start: int = 0, end: int = 23, phone: str = "+201000001111",
+async def _scene(session, *, start: int = 0, end: int = 24, phone: str = "+201000001111",
                  opt_in: bool = True) -> tuple[Tenant, RFQ, Supplier]:
     tenant = await _tenant(session)
     rfq = await _open_rfq(session, tenant)

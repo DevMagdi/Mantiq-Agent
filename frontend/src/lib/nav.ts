@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PERM } from "./permissions";
 
 export type NavItem = { to: string; key: string; icon: LucideIcon; permission: string };
 export type NavGroup = { id: string; labelKey: string; items: NavItem[] };
@@ -21,33 +22,33 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "overview",
     labelKey: "nav.groups.overview",
     items: [
-      { to: "/", key: "dashboard", icon: LayoutDashboard, permission: "report:read" },
-      { to: "/requests", key: "requests", icon: ClipboardList, permission: "pr:read" },
+      { to: "/", key: "dashboard", icon: LayoutDashboard, permission: PERM.reportRead },
+      { to: "/requests", key: "requests", icon: ClipboardList, permission: PERM.prRead },
     ],
   },
   {
     id: "sourcing",
     labelKey: "nav.groups.sourcing",
     items: [
-      { to: "/rfqs", key: "rfqs", icon: Factory, permission: "rfq:read" },
-      { to: "/approvals", key: "approvals", icon: CheckSquare, permission: "approval:read" },
+      { to: "/rfqs", key: "rfqs", icon: Factory, permission: PERM.rfqRead },
+      { to: "/approvals", key: "approvals", icon: CheckSquare, permission: PERM.approvalRead },
     ],
   },
   {
     id: "fulfilment",
     labelKey: "nav.groups.fulfilment",
     items: [
-      { to: "/purchase-orders", key: "purchaseOrders", icon: PackageCheck, permission: "po:read" },
-      { to: "/suppliers", key: "suppliers", icon: Truck, permission: "supplier:read" },
+      { to: "/purchase-orders", key: "purchaseOrders", icon: PackageCheck, permission: PERM.poRead },
+      { to: "/suppliers", key: "suppliers", icon: Truck, permission: PERM.supplierRead },
     ],
   },
   {
     id: "insight",
     labelKey: "nav.groups.insight",
     items: [
-      { to: "/analytics", key: "analytics", icon: BarChart3, permission: "report:read" },
-      { to: "/activity", key: "agents", icon: Activity, permission: "report:read" },
-      { to: "/settings", key: "settings", icon: Settings, permission: "settings:read" },
+      { to: "/analytics", key: "analytics", icon: BarChart3, permission: PERM.reportRead },
+      { to: "/activity", key: "agents", icon: Activity, permission: PERM.auditRead },
+      { to: "/settings", key: "settings", icon: Settings, permission: PERM.settingsRead },
     ],
   },
 ];

@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     require_mfa: bool = False
 
     # --- data ---
-    database_url: str = f"sqlite+aiosqlite:///{BACKEND_DIR / 'procureai.db'}"
+    # PostgreSQL 16 is the supported database. SQLite exists only for the test suite and for
+    # sandboxes without a PostgreSQL server, and must be opted into explicitly.
+    database_url: str = "postgresql+asyncpg://procureai:change-me@localhost:5432/procureai"
+    allow_sqlite_fallback: bool = False
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle_seconds: int = 1800
+    db_statement_timeout_ms: int = 15000
     redis_url: str = "redis://localhost:6379/0"
     tenant_rls_enabled: bool = True
     demo_seed_on_start: bool = True

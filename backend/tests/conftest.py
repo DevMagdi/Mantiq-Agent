@@ -14,7 +14,12 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="procureai-tests-"))
 os.environ.update({
     "APP_ENV": "test",
+    # The suite runs on the SQLite fallback: it is the only server-less backend available in CI.
+    # PostgreSQL-specific guarantees (RLS, pg_trgm, pgvector) are covered by the `postgres` job in
+    # .github/workflows/ci.yml, which runs the same migrations against a real PostgreSQL 16.
     "DATABASE_URL": f"sqlite+aiosqlite:///{_TMP / 'test.db'}",
+    "ALLOW_SQLITE_FALLBACK": "true",
+    "DEMO_SEED_ON_START": "false",
     "LLM_PROVIDER": "fake",
     "SECRET_KEY": "test-secret-key-not-for-production-0123456789abcdef",
     "BOOTSTRAP_ON_START": "false",
@@ -22,8 +27,10 @@ os.environ.update({
     "PUBLIC_BASE_URL": "http://testserver",
     # The suite must not depend on when it runs: the contact-hours rule has its own
     # explicit-clock tests (tests/test_policy_engine.py, tests/test_services_negotiation.py).
+    # 0..24 = the whole day: 24 is end-of-day, so the suite is timezone-proof (Cairo is UTC+2/+3;
+    # an end of 23 still excluded 23:00–24:00 local and failed the nightly CI run).
     "CONTACT_HOURS_START": "0",
-    "CONTACT_HOURS_END": "23",
+    "CONTACT_HOURS_END": "24",
 })
 
 import httpx  # noqa: E402

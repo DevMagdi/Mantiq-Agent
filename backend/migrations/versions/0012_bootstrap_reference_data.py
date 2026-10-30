@@ -1,6 +1,6 @@
 """bootstrap reference data (roles, permissions, plans, taxonomy, units, templates, call policy)
 
-Revision ID: 0012_bootstrap_seed_reference_data
+Revision ID: 0012_bootstrap_reference_data
 Revises: 0011_indexes_search_vectors
 Create Date: 2026-10-30 00:00:00
 
@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0012_bootstrap_seed_reference_data"
+revision: str = "0012_bootstrap_reference_data"
 down_revision: str | None = "0011_indexes_search_vectors"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

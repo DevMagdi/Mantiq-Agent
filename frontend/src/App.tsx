@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { type ReactNode } from "react";
 import { Shell } from "./components/Shell";
+import { RequirePermission } from "./components/Guard";
+import { PERM } from "./lib/permissions";
 import { useAuth } from "./lib/session";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -49,17 +51,61 @@ export default function App() {
           </Protected>
         }
       >
-        <Route index element={<DashboardPage />} />
-        <Route path="/requests" element={<RequestsPage />} />
-        <Route path="/rfqs" element={<RfqBoardPage />} />
-        <Route path="/rfqs/:id" element={<RfqDetailPage />} />
-        <Route path="/approvals" element={<ApprovalsPage />} />
-        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
-        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
-        <Route path="/suppliers" element={<SuppliersPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/activity" element={<ActivityPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route index element={
+            <RequirePermission permission={PERM.reportRead}>
+              <DashboardPage />
+            </RequirePermission>
+          } />
+        <Route path="/requests" element={
+            <RequirePermission permission={PERM.prRead}>
+              <RequestsPage />
+            </RequirePermission>
+          } />
+        <Route path="/rfqs" element={
+            <RequirePermission permission={PERM.rfqRead}>
+              <RfqBoardPage />
+            </RequirePermission>
+          } />
+        <Route path="/rfqs/:id" element={
+            <RequirePermission permission={PERM.rfqRead}>
+              <RfqDetailPage />
+            </RequirePermission>
+          } />
+        <Route path="/approvals" element={
+            <RequirePermission permission={PERM.approvalRead}>
+              <ApprovalsPage />
+            </RequirePermission>
+          } />
+        <Route path="/purchase-orders" element={
+            <RequirePermission permission={PERM.poRead}>
+              <PurchaseOrdersPage />
+            </RequirePermission>
+          } />
+        <Route path="/purchase-orders/:id" element={
+            <RequirePermission permission={PERM.poRead}>
+              <PurchaseOrderDetailPage />
+            </RequirePermission>
+          } />
+        <Route path="/suppliers" element={
+            <RequirePermission permission={PERM.supplierRead}>
+              <SuppliersPage />
+            </RequirePermission>
+          } />
+        <Route path="/analytics" element={
+            <RequirePermission permission={PERM.reportRead}>
+              <AnalyticsPage />
+            </RequirePermission>
+          } />
+        <Route path="/activity" element={
+            <RequirePermission permission={PERM.auditRead}>
+              <ActivityPage />
+            </RequirePermission>
+          } />
+        <Route path="/settings" element={
+            <RequirePermission permission={PERM.settingsRead}>
+              <SettingsPage />
+            </RequirePermission>
+          } />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

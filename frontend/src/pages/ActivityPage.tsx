@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { PageHeading } from "@/components/Shell";
 import { Badge, Card, CardHeader, Drawer, EmptyState, ErrorState, LoadingBlock, Progress, Spinner, StatusChip } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import { dateTime, money, num } from "@/lib/format";
 import type { AppLang } from "@/i18n";
 import type { AgentRun, Page } from "@/lib/types";
@@ -14,9 +16,12 @@ export default function ActivityPage() {
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
   const [selected, setSelected] = useState<AgentRun | null>(null);
 
+  const { can } = useAuth();
+  const allowed = can(PERM.auditRead);
   const runs = useQuery({
     queryKey: ["agent-runs"],
     queryFn: () => api.get<Page<AgentRun>>("/api/v1/agent-runs?page_size=50"),
+    enabled: allowed,
   });
 
   const detail = useQuery({
@@ -25,7 +30,11 @@ export default function ActivityPage() {
     enabled: Boolean(selected?.id),
   });
 
-  const tools = useQuery({ queryKey: ["agent-tools"], queryFn: () => api.get<{ items: { name: string; description: string; mutating: boolean; permission: string }[] }>("/api/v1/agent/tools") });
+  const tools = useQuery({
+    queryKey: ["agent-tools"],
+    queryFn: () => api.get<{ items: { name: string; description: string; mutating: boolean; permission: string }[] }>("/api/v1/agent/tools"),
+    enabled: allowed,
+  });
 
   if (runs.isLoading) return <LoadingBlock rows={8} />;
   if (runs.error) return <ErrorState message={errorMessage(runs.error)} onRetry={() => void runs.refetch()} />;

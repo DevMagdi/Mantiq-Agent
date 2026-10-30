@@ -61,18 +61,19 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 
 | ID | Requirement | Implementation | Proof | Status |
 | --- | --- | --- | --- | --- |
-| NFR-SEC-1 | Secrets never logged; PII encrypted at rest | `app/core/crypto.py`, `app/core/logging.py`, `privacy.py` | `tests/test_api_identity.py`, `tests/test_services_voice.py` (ciphertext at rest) | Done |
+| NFR-SEC-1 | Secrets never logged; PII encrypted at rest; unreadable ciphertext fails closed | `app/core/crypto.py`, `app/core/logging.py`, `privacy.py` | `tests/test_api_identity.py`, `tests/test_services_voice.py` (ciphertext at rest), `tests/test_crypto_resilience.py` (master-key mismatch withholds PII, list still 200) | Done |
 | NFR-SEC-3 | Untrusted supplier content isolated from instructions | `app/agents/guardrails.py` | `tests/test_injection_corpus.py` (40-payload corpus × AR/EN), `tests/test_services_privacy_portal.py` (public form injection) | Done |
 | NFR-SEC-4 | Brute-force resistance, session rotation, lockout | `app/services/auth.py` | `tests/test_services_approval_auth.py`, `tests/test_api_identity.py` | Done |
 | NFR-SAFE-1 | 60-case negotiation guardrail suite agrees with an independent oracle | `app/agents/policy_engine.py` vs. reference implementation in tests | `tests/test_negotiation_guardrails.py` (122 parametrised cases) | Done |
 | NFR-SAFE-2 | Prompt-injection corpus blocked or neutralised | `app/agents/guardrails.py` | `tests/test_injection_corpus.py` | Done |
 | NFR-AI-2 | Every agent run recorded with model, tokens, cost, reasoning | `agent_run` / `agent_step` / `tool_call`, `app/core/audit.py` | `tests/test_agents_graph.py`, `tests/test_api_admin.py` (`/agent-runs`) | Done |
 | NFR-DATA-1 | Decimal money, FX-safe rounding, bilingual numerals | `app/services/numbers.py` | `tests/test_numbers.py` (22) | Done |
-| NFR-PERF-1 | Indexes for list, board, audit and full-text paths | migration `0011_indexes_search_vectors` | `alembic check` clean; `tests/test_api_admin.py` pagination | Partial — pgvector path not exercised without Postgres |
+| NFR-PERF-1 | Indexes for list, board, audit and full-text paths; 50 concurrent users served | migration `0011_indexes_search_vectors`, `scripts/load_test.py` | `alembic check` on PostgreSQL 16 (CI job `postgres`); load test PASS: 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors (`docs/LOAD_TEST.md`) | Done |
 | NFR-PERF-2 | Reply parsing bounded (20k chars, no unbounded LLM context) | `app/services/extraction.py` | `tests/test_services_extraction.py` | Done |
 | NFR-PRV-1 | Data-subject rights with statutory deadlines | `app/services/privacy.py`, `data_erasure_request.due_at` | `tests/test_services_privacy_portal.py` | Done |
-| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (27 tests), measured contrast pairs in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI |
+| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (34 tests), measured contrast pairs in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI |
 | NFR-OPS-1 | Health/readiness/observability | `app/main.py` `/health` `/ready` `/metrics` | `tests/test_api_flow.py` | Done |
+| NFR-DATA-2 | PostgreSQL 16 is the only supported datastore; tenant isolation enforced by the database | `app/core/config.py` (`database_url`, `allow_sqlite_fallback`), `app/main.py` (`_assert_supported_database`), migration `0010_rls_policies_and_grants` | `scripts/verify_rls.py` (own rows visible / foreign rows 0 / cross-tenant write blocked / audit append-only), CI job `postgres` | Done |
 
 ## Acceptance criteria (spot-checked)
 
@@ -89,9 +90,10 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 
 ## What is not covered here
 
-1. Live PostgreSQL-only features (RLS enforcement, pgvector similarity ranking, `pg_trgm` search)
-   are guarded by dialect checks and enabled in production, but the sandbox has no Postgres.
-2. Real third-party clients (Anthropic/OpenAI, Twilio, Meta Cloud API, Paymob, ERP HTTP endpoints)
+1. Real third-party clients (Anthropic/OpenAI, Twilio, Meta Cloud API, Paymob, ERP HTTP endpoints)
    are implemented but not exercised: tests use their deterministic fakes.
-3. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
-   production build, TypeScript strict typecheck, ESLint, and 27 component/interaction tests.
+2. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
+   production build, TypeScript strict typecheck, ESLint, and 34 component/interaction tests.
+3. pgvector *similarity ranking* is not implemented (the columns and HNSW indexes exist and are
+   verified on PostgreSQL 16, but no service computes embeddings yet); search falls back to the
+   trigram path.

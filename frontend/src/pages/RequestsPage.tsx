@@ -261,29 +261,48 @@ function IntakeDrawer({ open, onClose, onCreated }: { open: boolean; onClose: ()
   );
 }
 
-function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onChanged: () => Promise<void> }) {
+export function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onChanged: () => Promise<void> }) {
   const { t, i18n } = useTranslation();
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
+  const toast = useToast();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState("");
 
-  const answer = async (question: Clarification) => {
+  const questions = request.clarifications ?? [];
+  const openQuestions = questions.filter((question) => question.status === "open");
+  const canSubmit = openQuestions.length === 0 && request.status === "clarifying";
+
+  const answer = async (question: Clarification, waive = false) => {
     setBusy(question.id);
     try {
       await api.post(`/api/v1/requests/${request.id}/clarifications/${question.id}/answer`, {
-        answer: answers[question.id] ?? "",
+        answer: waive ? "" : (answers[question.id] ?? ""),
+        waive,
       });
+      if (!waive) setAnswers((current) => ({ ...current, [question.id]: "" }));
       await onChanged();
+      toast.push(waive ? t("requests.clarificationWaived") : t("common.save"), "ok");
+    } catch (error) {
+      // Surface the API's own words instead of letting the promise reject in the console.
+      toast.push(errorMessage(error), "danger");
     } finally {
       setBusy(null);
     }
   };
 
   const submit = async () => {
+    if (!canSubmit) return;
     setBusy("submit");
+    setSubmitError("");
     try {
       await api.post(`/api/v1/requests/${request.id}/submit`);
       await onChanged();
+      toast.push(t("requests.submitted"), "ok");
+    } catch (error) {
+      // 422 carries "Resolve or waive all clarification questions before creating an RFQ." —
+      // show it inline and keep the drawer open so the user can act on it.
+      setSubmitError(errorMessage(error));
     } finally {
       setBusy(null);
     }
@@ -299,8 +318,6 @@ function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onCha
       setBusy(null);
     }
   };
-
-  const questions = request.clarifications ?? [];
 
   return (
     <div className="space-y-5">
@@ -325,7 +342,14 @@ function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onCha
 
       {questions.length > 0 ? (
         <section className="space-y-2">
-          <h3 className="text-sm font-semibold text-ink">{t("requests.clarifications")}</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-ink">{t("requests.clarifications")}</h3>
+            <Badge tone={openQuestions.length > 0 ? "warn" : "ok"}>
+              {openQuestions.length > 0
+                ? t("requests.openQuestions", { count: openQuestions.length })
+                : t("requests.allResolved")}
+            </Badge>
+          </div>
           {questions.map((question) => (
             <div key={question.id} className={cn("rounded-md border p-3", question.status === "open" ? "border-[color:var(--warn)]/40 bg-[color:var(--warn)]/5" : "border-line")}>
               <p className="text-sm text-ink">{lang === "ar" && question.question_ar ? question.question_ar : question.question}</p>
@@ -347,6 +371,15 @@ function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onCha
                     {busy === question.id ? <Spinner /> : null}
                     {t("common.save")}
                   </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={busy === question.id}
+                    title={t("requests.waiveHint")}
+                    onClick={() => void answer(question, true)}
+                  >
+                    {t("requests.waive")}
+                  </button>
                 </div>
               ) : (
                 <p className="mt-1 text-xs text-ink-muted">
@@ -355,11 +388,30 @@ function RequestDetail({ request, onChanged }: { request: PurchaseRequest; onCha
               )}
             </div>
           ))}
-          {request.status === "clarifying" ? (
-            <button type="button" className="btn-primary" disabled={busy === "submit"} onClick={() => void submit()}>
-              {busy === "submit" ? <Spinner /> : null}
-              {t("requests.submitForRfq")}
-            </button>
+        </section>
+      ) : null}
+
+      {request.status === "clarifying" ? (
+        <section className="space-y-2 rounded-lg border border-line bg-surface-raised/40 p-3">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!canSubmit || busy === "submit"}
+            aria-describedby={openQuestions.length > 0 ? "submit-blocker" : undefined}
+            onClick={() => void submit()}
+          >
+            {busy === "submit" ? <Spinner /> : null}
+            {t("requests.submitForRfq")}
+          </button>
+          {openQuestions.length > 0 ? (
+            <p id="submit-blocker" className="text-2xs text-[color:var(--warn-ink)]">
+              {t("requests.submitBlocked", { count: openQuestions.length })}
+            </p>
+          ) : null}
+          {submitError ? (
+            <p role="alert" className="rounded-md border border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 px-3 py-2 text-2xs text-[color:var(--danger-ink)]">
+              {submitError}
+            </p>
           ) : null}
         </section>
       ) : null}

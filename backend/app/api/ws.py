@@ -29,7 +29,9 @@ class Hub:
             self._rooms.get(tenant_id, set()).discard(ws)
 
     async def broadcast(self, tenant_id: str, event: str, payload: dict[str, Any]) -> None:
-        message = json.dumps({"event": event, "payload": payload}, default=str)
+        # `type` is the field every client reads; `event` is kept so older subscribers and the
+        # documented payload shape keep working.
+        message = json.dumps({"type": event, "event": event, "payload": payload}, default=str)
         async with self._lock:
             targets = list(self._rooms.get(tenant_id, set()))
         for ws in targets:
@@ -54,23 +56,49 @@ def publish(tenant_id: str, event: str, payload: dict[str, Any]) -> None:
     loop.create_task(hub.broadcast(tenant_id, event, payload))
 
 
+def _is_ping(raw: str) -> bool:
+    """Accept both the browser's bare `ping` and a JSON `{"type": "ping"}` frame."""
+    stripped = raw.strip()
+    if stripped == "ping":
+        return True
+    if not stripped.startswith("{"):
+        return False
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and data.get("type") == "ping"
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket, token: str = "") -> None:
+    """Tenant-scoped live feed.
+
+    The browser cannot set headers on a WebSocket, so the access token travels as a query
+    parameter. It is validated *after* the upgrade so the client receives a real close code
+    (4401) instead of an opaque handshake failure.
+    """
+    await ws.accept()
     try:
         payload = decode_token(token, "access")
     except ValueError:
-        await ws.close(code=4401)
+        await ws.close(code=4401, reason="invalid_token")
         return
     tenant_id = payload.get("tenant_id", "")
-    await ws.accept()
+    if not tenant_id:
+        await ws.close(code=4403, reason="no_tenant")
+        return
     await hub.join(tenant_id, ws)
-    await ws.send_text(json.dumps({"event": "connected", "payload": {"tenant_id": tenant_id}}))
+    await ws.send_text(json.dumps({"type": "connected", "event": "connected",
+                                   "payload": {"tenant_id": tenant_id}}))
     try:
         while True:
             raw = await ws.receive_text()
-            if raw == "ping":
-                await ws.send_text(json.dumps({"event": "pong", "payload": {}}))
+            if _is_ping(raw):
+                await ws.send_text(json.dumps({"type": "pong", "event": "pong", "payload": {}}))
     except WebSocketDisconnect:
         pass
+    except RuntimeError:  # pragma: no cover - the client vanished mid-send
+        log.debug("websocket closed while receiving")
     finally:
         await hub.leave(tenant_id, ws)

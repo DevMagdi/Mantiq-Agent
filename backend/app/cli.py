@@ -14,7 +14,7 @@ from app.db.session import SessionLocal
 from app.services.bootstrap import bootstrap as run_bootstrap
 from app.services.bootstrap import ensure_tenant, ensure_user, seed_reference_data, seed_tenant_defaults
 from app.services.migrations import upgrade_sync
-from app.services.seed import seed_demo as run_seed
+from app.services.seed import seed_demo_tenant as run_seed_tenant
 
 app = typer.Typer(help="ProcureAI operations CLI", no_args_is_help=True)
 
@@ -52,11 +52,9 @@ def seed_demo(slug: str = typer.Option("nile", help="Tenant slug to seed")):
 
     async def _inner():
         async with SessionLocal() as session:
-            await seed_reference_data(session)
-            tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
-            if not tenant:
-                tenant = await ensure_tenant(session, name="Nile Manufacturing Group", slug=slug)
-            result = await run_seed(session, tenant, demo_password=settings.bootstrap_demo_password)
+            result = await run_seed_tenant(
+                session, slug, demo_password=settings.bootstrap_demo_password
+            )
             await session.commit()
             return result
 
