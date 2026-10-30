@@ -1,6 +1,6 @@
 # ProcureAI — multi-tenant AI procurement platform
 
-**Branch:** `feat/procureai-platform` → `main`
+**Branch:** `arena/80427d61-mantiq-agent` → `main`
 **Scope:** the complete platform from the master build prompt — backend, frontend, agent, adapters,
 seed data, tests, docs, deployment and CI.
 
