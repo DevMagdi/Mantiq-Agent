@@ -223,3 +223,60 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     keeps returning 422 when a request is submitted with open questions (`AC-*` unchanged), and the
     detail page disables Submit, explains why with `aria-describedby`, and offers waive per question.
     Adding a second, softer server rule would have hidden the guard the SRS asks for.
+
+## Phase 2 — purchase-to-pay and accounting
+
+59. **The eleven P2P stages are derived from documents, not stored as a status field.** A stage is
+    reached only when its evidence exists (RFQ sent, offers present, all approval steps decided, PO
+    issued, receipt, confirmation, sealed package, posted invoice). `p2p_stage_event` records *when*
+    each stage was first reached, by whom and from which action, so the history cannot be rewritten
+    by later edits to the documents — but the current stage can never disagree with the papers.
+60. **The stage log and the ledger lines are append-only.** Migration `0015` grants the application
+    role `SELECT/INSERT/UPDATE/DELETE` on the new tables and then revokes `UPDATE`/`DELETE` on
+    `journal_line`, `cost_allocation` and `p2p_stage_event`; `scripts/verify_rls.py` proves both the
+    revocation and per-tenant isolation on a real PostgreSQL 16 in CI. A stage that was reached cannot
+    be un-reached and a posted number cannot be rewritten: corrections are new rows.
+61. **One chart of accounts per tenant, seeded with stable codes.** `110100` inventory, `110200`
+    GR/IR, `120100` VAT input, `210100` AP, `100100` bank, `510100` materials, `530100` price
+    variance, `540100` rounding, `220100` accrued, `300100` retained earnings. Tenants may rename
+    them; the codes are the contract that makes automatic postings reproducible.
+62. **GR/IR is a real clearing account, and the posting path depends on whether the receipt was
+    accrued.** With a posted receipt accrual, the invoice clears `110200` at *PO* cost and books the
+    price difference to `530100` (debit when unfavourable, credit when favourable). Without one, the
+    invoice debits inventory directly per line. Both paths are tested to the fils, because a system
+    that books the same invoice two ways without saying which one ran is unauditable.
+63. **An invoice posting requires three human facts, in this order: a clean match, an approved
+    invoice, and an accepted audit package.** The API returns `match_not_clean`,
+    `invoice_not_approved` or `audit_review_required` respectively. The audit gate can be disabled per
+    tenant (`settings.accounting_require_audit_review = false`) for a small entity that cannot staff a
+    separate auditor — disabling it is a tenant decision, not a code path an agent can reach.
+64. **Two-person control on manual entries only.** A document-derived entry has already passed the
+    auditor and the invoice approver, so the controller who drafted it may post it. A *manual* entry
+    (`source_type = "manual"`) cannot be posted by its creator: that is the one case where a single
+    person could otherwise invent a journal out of nothing.
+65. **Posted entries are immutable; corrections are reversals.** `reverse_entry` refuses an already
+    reversed entry, requires a written reason, mirrors every line with debits and credits swapped,
+    links the two rows (`reversal_of` / `reversed_by`) and excludes the original from the trial
+    balance *only through its mirror*. The trial balance sums `posted` **and** `reversed` rows so a
+    reversed entry and its mirror net to zero instead of vanishing.
+66. **Analytical accounting rides on the posting, not on the document.** Every inventory/expense debit
+    needs a cost centre (`missing_cost_center`), and the posting writes a `cost_allocation` fact with
+    the cost centre, unit number, item and quantity. Cost reports read the facts, so a later edit to
+    a PO cannot silently move cost between plants. System accounts (GR/IR, VAT, variance, rounding,
+    AP, bank) are exempt from the cost-centre rule.
+67. **The auditor package is sealed, not regenerated on read.** Each component is SHA-256 hashed, the
+    hash list is hashed into a manifest, and `GET .../audit-package` re-verifies the manifest on every
+    read (`verification.intact`). Re-assembling after new evidence resets a previously accepted
+    package to `assembled` and clears the reviewer: a seal that describes stale documents must not be
+    able to unlock a posting.
+68. **Assembly is automatic on confirmation, and audited.** The package is produced inside
+    `confirm_receipt` the moment the requester confirms the delivery (the point at which the evidence
+    is complete), with an `audit_package.assembled` audit row marked `automatic: true`. A failure to
+    assemble is logged but never rolls back a physical confirmation.
+69. **`controller` and `auditor` are separate roles, and neither can approve a purchase.**
+    `controller` owns draft/post/reverse plus cost master data; `auditor` is read-only on money with
+    `audit_package:review` — the reviewer cannot post, and the poster cannot self-review. Both are
+    seeded by migration `0015` and re-synced from `app/core/rbac.py` at bootstrap.
+70. **A partial receipt only accrues the increment.** `draft_receipt_accrual` subtracts everything
+    already accrued for the order (drafts included) per line and posts the difference; a second call
+    with nothing new returns `duplicate_accrual` rather than a zero-value journal.

@@ -713,3 +713,216 @@ export type PurchaseOrderDetail = Omit<PurchaseOrderSummary, "lines"> & {
   next_status: PoStatus | null;
   can_close: boolean;
 };
+
+/* ------------------------------------------------------------------ accounting (phase 2) */
+
+export type GlAccount = {
+  code: string;
+  name: string;
+  name_ar: string;
+  kind: "asset" | "liability" | "equity" | "revenue" | "expense";
+  normal_balance: "debit" | "credit";
+  parent_code: string | null;
+  is_control: boolean;
+  is_active: boolean;
+  description: string;
+};
+
+export type CostCenter = {
+  code: string;
+  name: string;
+  name_ar: string;
+  plant_id: string | null;
+  manager_id: string | null;
+  is_active: boolean;
+  description: string;
+};
+
+export type JournalLineView = {
+  line_no: number;
+  account_code: string;
+  account_name?: string;
+  description: string;
+  debit: string;
+  credit: string;
+  cost_center_code?: string | null;
+  unit_number?: string | null;
+  item_id?: string | null;
+  supplier_id?: string | null;
+  po_line_no?: number;
+};
+
+export type JournalEntryView = {
+  id: string;
+  number: string;
+  entry_date: string;
+  currency: string;
+  memo: string;
+  memo_ar: string;
+  status: "draft" | "posted" | "reversed";
+  status_label: string;
+  status_label_ar: string;
+  source_type: string;
+  source_label: string;
+  source_label_ar: string;
+  source_id: string | null;
+  po_id: string | null;
+  invoice_id: string | null;
+  receipt_id: string | null;
+  supplier_id: string | null;
+  total_debit: string;
+  total_credit: string;
+  balanced: boolean;
+  created_by: string | null;
+  created_at: string | null;
+  posted_by: string | null;
+  posted_at: string | null;
+  reversal_of: string | null;
+  reversed_by: string | null;
+  reversal_reason: string;
+  lines: JournalLineView[];
+};
+
+export type JournalList = {
+  items: JournalEntryView[];
+  total: number;
+  posted: number;
+  posted_total: string;
+};
+
+export type TrialBalance = {
+  items: {
+    code: string;
+    account_code: string;
+    account_name: string;
+    account_name_ar: string;
+    kind: string;
+    debit: string;
+    credit: string;
+    balance: string;
+  }[];
+  total_debit: string;
+  total_credit: string;
+  balanced: boolean;
+  currency: string;
+};
+
+export type CostReport = {
+  group_by: "cost_center" | "item" | "unit" | "supplier" | "po";
+  items: { key: string; label: string; label_ar: string; amount: string; share_pct: number }[];
+  total: string;
+  currency: string;
+};
+
+export type SupplierAccountView = {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  payable: string;
+  debit_total: string;
+  credit_total: string;
+  movements: {
+    entry_id: string;
+    number: string;
+    entry_date: string;
+    source_type: string;
+    source_label: string;
+    source_label_ar: string;
+    description: string;
+    debit: string;
+    credit: string;
+    invoice_id: string | null;
+  }[];
+  ledger_entries: {
+    id: string;
+    kind: string;
+    amount: string;
+    currency: string;
+    entry_date: string;
+    method: string;
+    reference: string;
+    invoice_id: string | null;
+    po_id: string | null;
+  }[];
+  balance: {
+    supplier_id: string;
+    outstanding: string;
+    overdue: string;
+    invoiced_total: string;
+    paid_total: string;
+    currency: string;
+    open_invoices: number;
+  };
+};
+
+export type AuditPackageComponent = {
+  kind: string;
+  label_en: string;
+  label_ar: string;
+  ref_id: string | null;
+  hash: string;
+  payload?: Record<string, unknown>;
+};
+
+export type AuditPackageView = {
+  id: string;
+  code: string;
+  po_id: string;
+  invoice_id: string | null;
+  status: "assembled" | "reviewed" | "queried";
+  status_label: string;
+  status_label_ar: string;
+  manifest_hash: string;
+  summary: Record<string, unknown>;
+  components: AuditPackageComponent[];
+  component_count: number;
+  generated_by: string | null;
+  generated_at: string | null;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  decision: "accepted" | "queried" | null;
+  comment: string;
+  can_post_to_accounts: boolean;
+};
+
+export type AuditPackageEnvelope = {
+  po_id: string;
+  package: AuditPackageView | null;
+  status: string;
+  can_post_to_accounts: boolean;
+  components: AuditPackageComponent[];
+  verification?: { intact: boolean; broken_components: string[]; manifest_hash: string };
+  hint_en?: string;
+  hint_ar?: string;
+};
+
+export type LifecycleStage = {
+  code: string;
+  label_en: string;
+  label_ar: string;
+  order: number;
+  state: "done" | "current" | "pending";
+  reached_at: string | null;
+  actor_id: string | null;
+};
+
+export type Lifecycle = {
+  po_id: string;
+  current: string;
+  current_label_en: string;
+  current_label_ar: string;
+  next_action_en: string;
+  next_action_ar: string;
+  stages: LifecycleStage[];
+  history: { stage: string; reached_at: string; actor_id: string | null; source: string }[];
+};
+
+export type PoAccounting = {
+  po_id: string;
+  currency: string;
+  entries: JournalEntryView[];
+  draft_count: number;
+  posted_count: number;
+  cost_by_center: CostReport;
+  accounts: { code: string; name: string; name_ar: string; kind: string }[];
+};

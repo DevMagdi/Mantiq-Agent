@@ -12,8 +12,8 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (513 backend tests, 27 frontend tests) and coverage (85% line coverage of
-`backend/app`) are reproduced in `docs/PR_DESCRIPTION.md`.
+Test counts (583 backend tests, 66 frontend tests) and coverage are reproduced in
+`docs/PR_DESCRIPTION.md`.
 
 ## Functional requirements
 
@@ -46,6 +46,25 @@ Test counts (513 backend tests, 27 frontend tests) and coverage (85% line covera
 | FR-PO-4 | Three-way match PO ↔ confirmed receipt ↔ invoice, with partial receipts and partial invoicing | `app/services/invoicing.py::compute_match`, `POST /invoices/{id}/match` | `tests/test_services_invoicing.py` (20), `tests/test_api_post_po.py` | Done |
 | FR-PO-5 | Deterministic payment-method suggestion after approval; no payment execution anywhere | `app/services/invoicing.py::suggest_payment`, `POST /invoices/{id}/approve` | `tests/test_services_invoicing.py`, `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool` | Done |
 | FR-PO-6 | Supplier ledger and outstanding / overdue balance per supplier | `app/services/invoicing.py::record_payment`, `supplier_balance(s)`, `GET /supplier-balances` | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` | Done |
+| FR-P2P-1 | Eleven-stage purchase-to-pay status derived from the documents, with recorded transitions | `app/services/p2p.py` (`STAGES`, `derive_stage`, `record_stage`, `touch`), `GET /purchase-orders/{id}/lifecycle` | `tests/test_services_p2p.py` (17), `tests/test_api_p2p_accounting_e2e.py` | Done |
+| FR-P2P-2 | Requisition ownership: the requesting department creates it, procurement is routed the work | `POST /requests/{id}/assign`, `purchase_requisition.assigned_to/department`, `PurchaseRequisition.status = in_procurement` | `tests/test_api_p2p_accounting_e2e.py`, `tests/test_api_intake.py` | Done |
+| FR-P2P-3 | Requester confirmation of the physical delivery (quantity + basic quality) | `app/services/receiving.py::confirm_receipt` | `tests/test_services_receiving.py`, `tests/test_api_post_po.py` | Done |
+| FR-P2P-4 | Automatic auditor document package (GRN, awarded offer/PO, approval record, invoice, match, postings) | `app/services/audit_package.py::assemble`, `GET/POST /purchase-orders/{id}/audit-package` | `tests/test_services_p2p.py`, `tests/test_api_accounting.py` | Done |
+| FR-P2P-5 | Sealed, verifiable package (SHA-256 components + manifest) that invalidates on new evidence | `audit_package.verify_manifest`, `package_view`, re-assembly reset on review | `tests/test_services_p2p.py` (manifest intact / tampered / invalidation) | Done |
+| FR-P2P-6 | Mandatory 3-way match before any posting, with stored result and mismatch details | `app/services/invoicing.py::compute_match` (stored on the invoice), `draft_invoice_posting` gate | `tests/test_services_invoicing.py`, `tests/test_api_p2p_accounting_e2e.py` (mismatch path) | Done |
+| FR-ACC-1 | Double-entry journal entries: chart of accounts, draft, post, reverse | `app/services/accounting.py`, `POST /accounting/journal-entries`, `/post`, `/reverse` | `tests/test_services_accounting.py` (24), `tests/test_api_accounting.py` | Done |
+| FR-ACC-2 | Every entry linked to its source documents (PO, GRN, invoice, match snapshot) | `JournalEntry.po_id/invoice_id/receipt_id/match_snapshot`, `entry_view` | `tests/test_api_p2p_accounting_e2e.py`, `tests/test_services_accounting.py` | Done |
+| FR-ACC-3 | GR/IR clearing, AP accrual, inventory/expense and VAT recognition, price variance | `draft_receipt_accrual`, `draft_invoice_posting`, `draft_payment_posting` | `tests/test_services_accounting.py` (exact amounts), `tests/test_api_p2p_accounting_e2e.py` | Done |
+| FR-ACC-4 | Controlled reversing entries with a mandatory reason and a link to the original | `accounting.reverse_entry`, `POST /accounting/journal-entries/{id}/reverse` | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` | Done |
+| FR-ACC-5 | Immutability: posted entries cannot be edited or deleted by the application role | Grants + `REVOKE UPDATE, DELETE` on `journal_line`, `cost_allocation`, `p2p_stage_event` | `scripts/verify_rls.py` (13 new checks), migration `0015` | Done |
+| FR-ACC-6 | Supplier sub-ledger: invoices, payments, notes and their journal support | `accounting.supplier_account`, `GET /accounting/supplier-account/{id}`, `invoicing.supplier_balance` | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` | Done |
+| FR-ACC-7 | Trial balance over posted entries, always balanced | `accounting.trial_balance`, `GET /accounting/trial-balance` | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` | Done |
+| FR-COST-1 | Post procurement cost to cost centre, unit number and item | `CostAllocation`, `POST .../accounting/accrual|posting` allocations, `cost_report(group_by=...)` | `tests/test_services_accounting.py`, `tests/test_api_p2p_accounting_e2e.py` | Done |
+| FR-COST-2 | Cost analysis by cost centre, product/item, unit, supplier and order | `accounting.cost_report`, `GET /accounting/cost-report` | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` | Done |
+| FR-COST-3 | Cost centres and chart of accounts maintainable, deactivation blocked while in use | `create_account/update_account/create_cost_center`, `PATCH /accounting/accounts/{code}` | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` | Done |
+| FR-AUD-1 | Auditor review decision (accept / query) recorded with reviewer and comment | `audit_package.review`, `POST /audit-packages/{id}/review`, RBAC `audit_package:review` | `tests/test_services_p2p.py`, `tests/test_api_accounting.py` | Done |
+| FR-AUD-2 | Posting only after a successful match, an approved invoice and an accepted package | `draft_invoice_posting` gates (`match_not_clean`, `invoice_not_approved`, `audit_review_required`) | `tests/test_api_p2p_accounting_e2e.py`, `tests/test_services_accounting.py` | Done |
+| FR-RBAC-1 | New roles `controller` and `auditor` with a strict, non-overlapping matrix | `app/core/rbac.py`, migration `0015`, demo users in `services/seed.py` | `tests/test_api_accounting.py` (permission boundary per persona), `tests/test_frontend_permissions.py` | Done |
 | FR-RPT-1 | Savings, cycle time, forecast, Excel export | `app/services/analytics.py` | `tests/test_services_analytics.py` (9) | Done |
 | FR-BIL-2 | Usage metering, plans, invoices | `app/services/billing_helpers.py`, `POST /billing/invoice` | `tests/test_services_award_discovery.py`, `tests/test_api_admin.py` | Done |
 | FR-ADM-3 | LLM provider configuration per tenant | `app/agents/llm/__init__.py`, `PUT /llm-config` | `tests/test_api_admin.py`, `tests/test_adapters.py` | Done |
@@ -87,6 +106,15 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 | AC-PO-2 | A purchase order cannot close before the requesting team confirms the delivery | `tests/test_services_receiving.py` (close requires `confirmed`) |
 | AC-PO-3 | An invoice whose quantity exceeds the confirmed receipt, or whose price exceeds tolerance, is flagged and cannot be approved without a recorded override reason | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` |
 | AC-PO-4 | No agent tool can approve an invoice, confirm a receipt or move money | `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool` |
+| AC-P2P-1 | A stage is never shown as reached unless its document exists, and the written history matches the rail | `tests/test_services_p2p.py` (`derive_stage`, `lifecycle`, `record_stage`) |
+| AC-P2P-2 | Receipts may be partial; a confirmed receipt is required before the invoice can be matched | `tests/test_services_receiving.py`, `tests/test_api_p2p_accounting_e2e.py` |
+| AC-P2P-3 | The package is assembled automatically at confirmation and a broken seal is detected | `tests/test_services_p2p.py` (auto assembly, tampered component) |
+| AC-P2P-4 | An accepted package that no longer describes the documents is reset to `assembled` | `tests/test_services_p2p.py::test_new_evidence_invalidates_a_previous_acceptance` |
+| AC-ACC-1 | A journal entry that does not balance is refused with both totals in the error | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` |
+| AC-ACC-2 | A posted entry cannot be reversed twice, and a reversal without a reason is refused | `tests/test_services_accounting.py`, `tests/test_api_accounting.py` |
+| AC-ACC-3 | The trial balance stays balanced after every posting, including reversals | `tests/test_services_accounting.py`, `tests/test_api_p2p_accounting_e2e.py` |
+| AC-ACC-4 | Only a human holding `accounting:post` posts, and never their own manual entry | `tests/test_api_accounting.py` (`segregation_of_duties`) |
+| AC-ACC-5 | Cost never leaves the analytical dimension: an inventory debit without a cost centre is refused | `tests/test_services_accounting.py::test_a_cost_debit_without_a_cost_centre_is_refused` |
 
 ## What is not covered here
 

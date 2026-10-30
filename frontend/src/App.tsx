@@ -13,6 +13,9 @@ import ApprovalsPage from "./pages/ApprovalsPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
+import JournalPage from "./pages/JournalPage";
+import AccountingReportsPage from "./pages/AccountingReportsPage";
+import AccountingSetupPage from "./pages/AccountingSetupPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -89,6 +92,21 @@ export default function App() {
         <Route path="/suppliers" element={
             <RequirePermission permission={PERM.supplierRead}>
               <SuppliersPage />
+            </RequirePermission>
+          } />
+        <Route path="/accounting" element={
+            <RequirePermission permission={PERM.accountingRead}>
+              <JournalPage />
+            </RequirePermission>
+          } />
+        <Route path="/accounting/reports" element={
+            <RequirePermission permission={PERM.costRead}>
+              <AccountingReportsPage />
+            </RequirePermission>
+          } />
+        <Route path="/accounting/setup" element={
+            <RequirePermission permission={PERM.accountingRead}>
+              <AccountingSetupPage />
             </RequirePermission>
           } />
         <Route path="/analytics" element={

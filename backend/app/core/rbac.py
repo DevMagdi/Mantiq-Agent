@@ -16,6 +16,8 @@ ROLES: dict[str, dict[str, str]] = {
     "requester": {"name": "Plant / Department Requester", "name_ar": "طالب من المصنع أو القسم"},
     "finance_approver": {"name": "Finance Approver", "name_ar": "معتمد مالي"},
     "warehouse": {"name": "Warehouse / Stores", "name_ar": "أمين المخزن"},
+    "controller": {"name": "Financial Controller", "name_ar": "مدير الحسابات"},
+    "auditor": {"name": "Internal Auditor", "name_ar": "المراجع الداخلي"},
 }
 
 ALL_PERMISSIONS: dict[str, str] = {
@@ -56,6 +58,14 @@ ALL_PERMISSIONS: dict[str, str] = {
     "invoice:approve": "Approve a three-way matched invoice for payment",
     "payment:record": "Record a payment that was executed outside the platform",
     "ledger:read": "View supplier balances and the payment ledger",
+    "accounting:read": "View the chart of accounts, journal entries and accounting reports",
+    "accounting:write": "Draft journal entries and cost allocations (no posting)",
+    "accounting:post": "Post a balanced journal entry to the ledger",
+    "accounting:reverse": "Reverse a posted journal entry",
+    "cost:read": "View cost centre and product cost reports",
+    "cost:write": "Maintain cost centres and analytical dimensions",
+    "audit_package:read": "View the auditor document package for a purchase order",
+    "audit_package:review": "Record the auditor's review decision on a document package",
     "report:read": "View analytics and reports",
     "comment:create": "Comment and mention colleagues",
     "audit:read": "View audit trail and agent activity",
@@ -91,6 +101,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "negotiation:auto", "comparison:read", "approval:read", "approval:decide",
         "approval:delegate", "po:create", "po:update", "po:read", "po:export",
         "receipt:create", "receipt:confirm", "invoice:create", "invoice:approve", "ledger:read",
+        "accounting:read", "accounting:write", "cost:read", "cost:write", "audit_package:read",
         "report:read", "comment:create", "audit:read", "admin:templates", "settings:read",
     },
     "buyer": {
@@ -98,13 +109,28 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "rfq:send", "supplier:read", "supplier:create", "supplier:update", "supplier:discovery",
         "offer:read", "offer:verify", "negotiation:read", "negotiation:draft", "negotiation:send",
         "comparison:read", "approval:read", "po:create", "po:read", "invoice:create",
-        "ledger:read", "report:read", "comment:create", "settings:read",
+        "ledger:read", "accounting:read", "cost:read", "audit_package:read",
+        "report:read", "comment:create", "settings:read",
     },
     "requester": READ_ONLY_REQUESTER,
     "finance_approver": {
         "pr:read", "rfq:read", "offer:read", "comparison:read", "approval:read", "approval:decide",
         "approval:delegate", "po:read", "supplier:read", "invoice:create", "invoice:approve",
-        "payment:record", "ledger:read", "report:read", "comment:create", "audit:read", "settings:read",
+        "payment:record", "ledger:read", "accounting:read", "accounting:write", "cost:read",
+        "audit_package:read", "report:read", "comment:create", "audit:read", "settings:read",
+    },
+    # The controller owns the books: drafts, posts and reverses, but never approves a purchase.
+    "controller": {
+        "pr:read", "rfq:read", "po:read", "supplier:read", "invoice:create", "invoice:approve",
+        "payment:record", "ledger:read", "accounting:read", "accounting:write", "accounting:post",
+        "accounting:reverse", "cost:read", "cost:write", "audit_package:read", "report:read",
+        "comment:create", "audit:read", "settings:read",
+    },
+    # Read-only on money, plus the audit gate: an auditor reviews packages, never posts or pays.
+    "auditor": {
+        "pr:read", "rfq:read", "offer:read", "comparison:read", "po:read", "supplier:read",
+        "ledger:read", "accounting:read", "cost:read", "audit_package:read", "audit_package:review",
+        "approval:read", "approval:decide", "report:read", "comment:create", "audit:read", "settings:read",
     },
     "warehouse": {
         "po:read", "receipt:create", "supplier:read", "comment:create", "report:read", "settings:read",

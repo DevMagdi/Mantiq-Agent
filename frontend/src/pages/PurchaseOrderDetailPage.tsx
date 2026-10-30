@@ -30,6 +30,9 @@ import {
   cn,
   useToast,
 } from "@/components/ui";
+import { AuditPackageCard } from "@/components/AuditPackageCard";
+import { P2PRail } from "@/components/P2PRail";
+import { PostingsCard } from "@/components/PostingsCard";
 import { api, errorMessage } from "@/lib/api";
 import { date, dateTime, money, num } from "@/lib/format";
 import { useAuth } from "@/lib/session";
@@ -37,6 +40,7 @@ import { PERM } from "@/lib/permissions";
 import type { AppLang } from "@/i18n";
 import type {
   GoodsReceipt,
+  Lifecycle,
   MatchResult,
   PurchaseOrderDetail,
   SupplierInvoice,
@@ -69,8 +73,17 @@ export default function PurchaseOrderDetailPage() {
     enabled: Boolean(id),
   });
 
+  const lifecycleQuery = useQuery({
+    queryKey: ["lifecycle", id],
+    queryFn: () => api.get<Lifecycle>(`/api/v1/purchase-orders/${id}/lifecycle`),
+    enabled: Boolean(id),
+  });
+
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ["purchase-order", id] });
+    await queryClient.invalidateQueries({ queryKey: ["lifecycle", id] });
+    await queryClient.invalidateQueries({ queryKey: ["po-accounting", id] });
+    await queryClient.invalidateQueries({ queryKey: ["audit-package", id] });
     await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
     await queryClient.invalidateQueries({ queryKey: ["supplier-balances"] });
   };
@@ -163,7 +176,22 @@ export default function PurchaseOrderDetailPage() {
         }
       />
 
-      <LifecycleStepper po={po} activeStep={activeStep} />
+      {lifecycleQuery.data ? (
+        <Card className="overflow-hidden">
+          <CardHeader
+            title={t("accounting.rail.title")}
+            subtitle={t("accounting.rail.subtitle")}
+            action={
+              <Badge tone="gold">
+                {lang === "ar" ? lifecycleQuery.data.current_label_ar : lifecycleQuery.data.current_label_en}
+              </Badge>
+            }
+          />
+          <P2PRail lifecycle={lifecycleQuery.data} />
+        </Card>
+      ) : (
+        <LifecycleStepper po={po} activeStep={activeStep} />
+      )}
 
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="space-y-4 xl:col-span-2">
@@ -327,6 +355,10 @@ export default function PurchaseOrderDetailPage() {
             </div>
           </Card>
           ) : null}
+
+          <PostingsCard po={po} onChanged={invalidate} />
+
+          <AuditPackageCard poId={po.id} onChanged={invalidate} />
 
           <Card>
             <CardHeader title={t("purchaseOrders.lifecycle")} />

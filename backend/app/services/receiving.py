@@ -17,8 +17,9 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.entities import GoodsReceipt, PurchaseOrder, Supplier, Tenant
-from app.services import numbers
+from app.core.audit import audit
+from app.db.models.entities import GoodsReceipt, PurchaseOrder, Supplier, Tenant, User
+from app.services import numbers, p2p
 from app.services.common import next_code, notify, notify_role
 
 log = logging.getLogger("procureai.receiving")
@@ -73,6 +74,7 @@ async def mark_in_transit(session: AsyncSession, tenant: Tenant, po: PurchaseOrd
                  title_ar=f"أمر الشراء {po.code} في الطريق" + (f" عبر {carrier}" if carrier else ""),
                  body=(f"Expected {expected_at.date().isoformat()}" if expected_at else "No ETA given."),
                  link=f"/purchase-orders/{po.id}")
+    await p2p.touch(session, tenant.id, po, actor_id=actor_id, source="po_in_transit")
     return {"ok": True, "status": po.status, "carrier": carrier,
             "expected_at": expected_at.isoformat() if expected_at else None}
 
@@ -167,6 +169,7 @@ async def create_receipt(session: AsyncSession, tenant: Tenant, po: PurchaseOrde
                       title_ar=f"تم استلام بضاعة لأمر الشراء {po.code} - مطلوب التأكيد",
                       body=f"Warehouse recorded {receipt.code}. Confirm the items match the request.",
                       link=f"/purchase-orders/{po.id}", severity="warning")
+    await p2p.touch(session, tenant.id, po, actor_id=received_by, source="goods_receipt")
     log.info("goods receipt %s recorded for PO %s", receipt.code, po.code)
     return {"ok": True, "receipt_id": receipt.id, "code": receipt.code, "status": receipt.status,
             "po_status": po.status, "supplier": supplier.name if supplier else "",
@@ -252,6 +255,22 @@ async def confirm_receipt(session: AsyncSession, tenant: Tenant, receipt: GoodsR
                      title=f"{receipt.code} rejected by the requester",
                      title_ar=f"تم رفض استلام {receipt.code} من طالب الشراء",
                      body=comment[:300], link=href, severity="warning")
+    if decision == "confirm":
+        # The auditor's package is assembled automatically the moment the need is confirmed: the
+        # evidence is complete at that point, and nothing in the bundle is created by a model.
+        from app.services import audit_package  # local import: audit_package imports this module
+
+        try:
+            package = await audit_package.assemble(session, tenant, po, generated_by=confirmed_by)
+            actor = await session.get(User, confirmed_by) if confirmed_by else None
+            await audit(session, tenant_id=tenant.id, action="audit_package.assembled",
+                        actor_id=confirmed_by, actor_label=actor.email if actor else "requester",
+                        entity_type="purchase_order", entity_id=po.id,
+                        after={"code": package.code, "components": len(package.components or []),
+                               "manifest": package.manifest_hash, "automatic": True})
+        except Exception:  # noqa: BLE001 - a package failure must never undo a physical confirmation
+            log.exception("could not assemble the audit package for %s", po.code)
+    await p2p.touch(session, tenant.id, po, actor_id=confirmed_by, source="requester_confirmation")
     return {"ok": True, "receipt_id": receipt.id, "status": receipt.status, "po_status": po.status}
 
 
@@ -291,6 +310,7 @@ async def close_po(session: AsyncSession, tenant: Tenant, po: PurchaseOrder, *, 
     await notify(session, tenant_id=tenant.id, user_id=po.created_by, kind="po_closed",
                  title=f"PO {po.code} closed", title_ar=f"تم إغلاق أمر الشراء {po.code}",
                  body=reason[:300] or "Delivery fully confirmed.", link=f"/purchase-orders/{po.id}")
+    await p2p.touch(session, tenant.id, po, actor_id=actor_id, source="po_closed")
     return {"ok": True, "status": po.status, "closed_at": po.closed_at.isoformat()}
 
 

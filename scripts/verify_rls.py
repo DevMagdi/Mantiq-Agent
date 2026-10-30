@@ -136,6 +136,35 @@ async def main() -> int:
             touched = await conn.execute("UPDATE supplier SET city = city WHERE id = $1", supplier)
             check("another tenant's row cannot be updated", touched.endswith(" 0"), touched)
 
+        # ------------------------------------------------------------------ phase 2: the books
+        # Every accounting table is tenant-scoped, and the three line-level tables are append-only
+        # for the application role: a posted ledger can only be corrected by a reversing entry.
+        accounting_tables = ("gl_account", "cost_center", "journal_entry", "journal_line",
+                             "cost_allocation", "audit_package", "p2p_stage_event")
+        await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+        for table in accounting_tables:
+            own_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
+            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[1])
+            foreign_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
+            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+            check(f"{table} is tenant-isolated", foreign_rows == 0,
+                  f"{own_rows} own row(s), {foreign_rows} visible to another tenant")
+
+        append_only = {"journal_line": "debit", "cost_allocation": "amount", "p2p_stage_event": "source"}
+        for table, column in append_only.items():
+            for verb, statement in (
+                ("UPDATE", f"UPDATE {table} SET {column} = {column}"),
+                ("DELETE", f"DELETE FROM {table}"),
+            ):
+                try:
+                    await conn.execute(statement)
+                except asyncpg.InsufficientPrivilegeError:
+                    check(f"{table} rejects {verb}", True, "no grant for the app role")
+                except asyncpg.RaiseError as exc:
+                    check(f"{table} rejects {verb}", "append-only" in str(exc), "trigger")
+                else:
+                    check(f"{table} rejects {verb}", False, "statement ran")
+
         # Two independent guards: the append-only trigger, and the missing UPDATE/DELETE grant
         # for the application role. Either one refusing the statement is a pass.
         for statement in ("UPDATE audit_log SET action = action", "DELETE FROM audit_log"):

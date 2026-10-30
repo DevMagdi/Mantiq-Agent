@@ -1,6 +1,9 @@
 import {
   Activity,
   BarChart3,
+  BookOpen,
+  Calculator,
+  Landmark,
   CheckSquare,
   ClipboardList,
   Factory,
@@ -40,6 +43,15 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/purchase-orders", key: "purchaseOrders", icon: PackageCheck, permission: PERM.poRead },
       { to: "/suppliers", key: "suppliers", icon: Truck, permission: PERM.supplierRead },
+    ],
+  },
+  {
+    id: "accounting",
+    labelKey: "nav.groups.accounting",
+    items: [
+      { to: "/accounting", key: "journal", icon: BookOpen, permission: PERM.accountingRead },
+      { to: "/accounting/reports", key: "costs", icon: Calculator, permission: PERM.costRead },
+      { to: "/accounting/setup", key: "accountingSetup", icon: Landmark, permission: PERM.accountingRead },
     ],
   },
   {
