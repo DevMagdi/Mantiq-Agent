@@ -135,7 +135,8 @@ async def send_message(
     decision = check_dispatch(
         policy=None, sent_today=sent_today, daily_cap=DAILY_CAP, channel=channel, opt_in=opted_in,
         blacklisted=blacklisted, sanctioned=sanctioned, timezone=tenant.timezone,
-        working_hours=(0, 23) if channel == "web_form" else (7, 21),
+        working_hours=(0, 23) if channel == "web_form"
+        else (settings.contact_hours_start, settings.contact_hours_end),
     )
     if not available:
         decision.codes.append("BLOCK_CHANNEL_UNAVAILABLE")

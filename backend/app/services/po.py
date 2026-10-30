@@ -35,7 +35,7 @@ async def create_po_for_offer(session: AsyncSession, tenant: Tenant, rfq: RFQ, o
         quantity = (line.quantity or Decimal("0")) * share
         po_lines.append({
             "description": line.description or "Quoted item",
-            "quantity": str(quantity.normalize()),
+            "quantity": numbers.plain(quantity),
             "uom": line.uom,
             "unit_price": str(line.unit_price),
             "line_total": str(numbers.money(line.unit_price * quantity)),

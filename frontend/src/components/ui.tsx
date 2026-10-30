@@ -57,7 +57,7 @@ export function EmptyState({
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div role="alert" className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full border border-line bg-surface-raised text-[color:var(--danger)]">
+      <div className="flex size-12 items-center justify-center rounded-full border border-line bg-surface-raised text-[color:var(--danger-ink)]">
         <AlertTriangle className="size-5" aria-hidden />
       </div>
       <p className="max-w-lg text-sm text-ink">{message}</p>
@@ -87,10 +87,10 @@ export type Tone = "neutral" | "gold" | "ok" | "warn" | "danger" | "info";
 const TONE_CLASS: Record<Tone, string> = {
   neutral: "border-line text-ink-muted",
   gold: "border-gold/60 bg-gold/10 text-[color:var(--gold-300)]",
-  ok: "border-[color:var(--ok)]/40 bg-[color:var(--ok)]/10 text-[color:var(--ok)]",
-  warn: "border-[color:var(--warn)]/40 bg-[color:var(--warn)]/10 text-[color:var(--warn)]",
-  danger: "border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 text-[color:var(--danger)]",
-  info: "border-[color:var(--info)]/40 bg-[color:var(--info)]/10 text-[color:var(--info)]",
+  ok: "border-[color:var(--ok)]/40 bg-[color:var(--ok)]/10 text-[color:var(--ok-ink)]",
+  warn: "border-[color:var(--warn)]/40 bg-[color:var(--warn)]/10 text-[color:var(--warn-ink)]",
+  danger: "border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 text-[color:var(--danger-ink)]",
+  info: "border-[color:var(--info)]/40 bg-[color:var(--info)]/10 text-[color:var(--info-ink)]",
 };
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -119,6 +119,23 @@ const STATUS_TONE: Record<string, Tone> = {
   blocked: "danger",
   send: "ok",
   draft_ok: "gold",
+  /* post-award lifecycle */
+  issued: "info",
+  in_transit: "info",
+  partially_received: "warn",
+  received: "gold",
+  confirmed: "ok",
+  matched: "ok",
+  mismatched: "danger",
+  mismatch: "danger",
+  incomplete: "warn",
+  approved_for_payment: "ok",
+  partially_paid: "warn",
+  paid: "ok",
+  disputed: "danger",
+  settled: "ok",
+  overdue: "danger",
+  outstanding: "warn",
 };
 
 export function StatusChip({ status, label }: { status: string; label?: string }) {
@@ -178,7 +195,7 @@ export function Kpi({
       <p className="mt-2 text-2xl font-semibold tabular text-ink">{value}</p>
       <div className="mt-1 flex items-center gap-2 text-xs">
         {trend ? (
-          <span className={trend.value >= 0 ? "text-[color:var(--ok)]" : "text-[color:var(--danger)]"}>
+          <span className={trend.value >= 0 ? "text-[color:var(--ok-ink)]" : "text-[color:var(--danger-ink)]"}>
             {trend.value >= 0 ? "▲" : "▼"} {Math.abs(trend.value).toFixed(1)}%
           </span>
         ) : null}

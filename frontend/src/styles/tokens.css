@@ -1,9 +1,14 @@
 /* ProcureAI design tokens — Mantiq Technologies.
-   Navy/gold institutional palette, reused verbatim across light and dark themes.
-   Components must consume these variables (or the Tailwind aliases) and never hard-code hex. */
+   One institutional theme only: Mantiq navy with a gold accent. There is no light theme and no
+   theme switch — the application is always navy. Components must consume these variables (or the
+   Tailwind aliases) and never hard-code a hex value. */
+
 :root {
-  /* Hex values are the source of truth; the *-rgb triples exist so Tailwind can
-     apply opacity modifiers (e.g. bg-surface-raised/60) while themes swap. */
+  color-scheme: dark;
+
+  /* ---------------------------------------------------------------- brand */
+  /* Hex values are the source of truth; the *-rgb triples exist so Tailwind can apply opacity
+     modifiers (e.g. bg-surface-raised/60). */
   --navy: #16283f;
   --navy-rgb: 22 40 63;
   --navy-900: #0d1a2b;
@@ -19,37 +24,20 @@
   --gold-300: #e3c766;
   --gold-300-rgb: 227 199 102;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 16px;
-
-  --font-display: 600;
-  --shadow-card: 0 1px 2px rgba(13, 26, 43, 0.08), 0 8px 24px rgba(13, 26, 43, 0.06);
-  --shadow-pop: 0 12px 32px rgba(13, 26, 43, 0.18);
-  --focus-ring: rgba(201, 162, 39, 0.45);
-  --ok: #1f7a4d;
-  --ok-rgb: 31 122 77;
-  --warn: #b7791f;
-  --warn-rgb: 183 121 31;
-  --danger: #b42318;
-  --danger-rgb: 180 35 24;
-  --info: #1d5f9f;
-  --info-rgb: 29 95 159;
-}
-
-/* Dark is the default theme (Section 4 of the master build prompt). */
-:root,
-[data-theme="dark"] {
-  color-scheme: dark;
+  /* ---------------------------------------------------------------- surfaces */
+  /* page < panel < raised, so elevation reads as light rather than as a border. */
   --surface: #0f1b2a;
   --surface-rgb: 15 27 42;
+  --surface-sunken: #0b1624;
+  --surface-sunken-rgb: 11 22 36;
   --surface-alt: #142436;
   --surface-alt-rgb: 20 36 54;
   --surface-raised: #1a2c41;
   --surface-raised-rgb: 26 44 65;
   --line: #27384d;
   --line-rgb: 39 56 77;
+  --line-strong: #33475f;
+  --line-strong-rgb: 51 71 95;
   --ink: #eef2f7;
   --ink-rgb: 238 242 247;
   --ink-muted: #a9b7c7;
@@ -57,26 +45,65 @@
   --ink-subtle: #7a8a9d;
   --ink-subtle-rgb: 122 138 157;
   --gold-contrast: #0d1a2b;
-}
 
-[data-theme="light"] {
-  color-scheme: light;
-  --surface: #f6f7f9;
-  --surface-rgb: 246 247 249;
-  --surface-alt: #ffffff;
-  --surface-alt-rgb: 255 255 255;
-  --surface-raised: #ffffff;
-  --surface-raised-rgb: 255 255 255;
-  --line: #dde3ea;
-  --line-rgb: 221 227 234;
-  --ink: #16283f;
-  --ink-rgb: 22 40 63;
-  --ink-muted: #4c5c70;
-  --ink-muted-rgb: 76 92 112;
-  --ink-subtle: #6b7b8f;
-  --ink-subtle-rgb: 107 123 143;
-  --gold-contrast: #0d1a2b;
-  --shadow-card: 0 1px 2px rgba(13, 26, 43, 0.06), 0 6px 18px rgba(13, 26, 43, 0.05);
+  /* ---------------------------------------------------------------- sidebar */
+  /* The rail is one step darker than the page so the content area reads as the surface. */
+  --sidebar: #0b1624;
+  --sidebar-rgb: 11 22 36;
+  --sidebar-raised: #16283f;
+  --sidebar-raised-rgb: 22 40 63;
+  --sidebar-line: #1f3247;
+  --sidebar-line-rgb: 31 50 71;
+  --sidebar-ink: #e6ecf4;
+  --sidebar-ink-rgb: 230 236 244;
+  --sidebar-ink-muted: #93a4b8;
+  --sidebar-ink-muted-rgb: 147 164 184;
+
+  /* ---------------------------------------------------------------- semantic */
+  /* Fills and bars use the saturated base; text uses the -ink variant, which is the same hue
+     lightened until it clears WCAG AA (>= 4.5:1) on --surface, --surface-alt and --surface-raised. */
+  --ok: #1f7a4d;
+  --ok-rgb: 31 122 77;
+  --ok-ink: #4ec98c;
+  --ok-ink-rgb: 78 201 140;
+  --warn: #b7791f;
+  --warn-rgb: 183 121 31;
+  --warn-ink: #e8b25a;
+  --warn-ink-rgb: 232 178 90;
+  --danger: #b42318;
+  --danger-rgb: 180 35 24;
+  --danger-ink: #f2776b;
+  --danger-ink-rgb: 242 119 107;
+  --info: #1d5f9f;
+  --info-rgb: 29 95 159;
+  --info-ink: #6fb0e8;
+  --info-ink-rgb: 111 176 232;
+
+  /* ---------------------------------------------------------------- geometry */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --sidebar-width: 264px;
+  --sidebar-width-collapsed: 72px;
+  --header-height: 56px;
+
+  /* ---------------------------------------------------------------- type */
+  --font-display: 600;
+
+  /* ---------------------------------------------------------------- depth */
+  /* Three steps only: resting card, raised control, floating overlay. */
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(6, 12, 20, 0.4);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 6px 16px rgba(6, 12, 20, 0.35);
+  --shadow-3: 0 24px 48px -12px rgba(4, 9, 16, 0.65);
+  --shadow-card: var(--shadow-2);
+  --shadow-pop: var(--shadow-3);
+  --focus-ring: rgba(201, 162, 39, 0.45);
+
+  /* ---------------------------------------------------------------- motion */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 html {
@@ -88,6 +115,7 @@ body {
   font-family: Inter, "IBM Plex Sans Arabic", system-ui, sans-serif;
   font-feature-settings: "tnum" 1, "cv05" 1;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 [dir="rtl"] body {
@@ -123,7 +151,7 @@ input[inputmode="decimal"] {
   color: var(--gold-contrast);
 }
 
-/* Thin, unobtrusive scrollbars that remain visible against both surfaces. */
+/* Thin, unobtrusive scrollbars that stay visible against the navy surfaces. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;

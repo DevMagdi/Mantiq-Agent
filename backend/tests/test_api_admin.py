@@ -20,13 +20,16 @@ async def test_me_returns_nested_tenant_and_permissions(client, admin):
 
 async def test_preferences_roundtrip(client, admin):
     resp = await client.patch("/api/v1/auth/me", headers=admin["headers"],
-                              json={"locale": "en", "theme": "light", "numerals": "western"})
+                              json={"locale": "en", "preferred_currency": "USD"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["theme"] == "light" or body.get("user", {}).get("theme") == "light"
+    assert body["locale"] == "en" and body["preferred_currency"] == "USD"
+    # There is exactly one theme, so the payload must not advertise a switch that does not exist.
+    assert "theme" not in body and "numerals" not in body
     back = await client.get("/api/v1/auth/me", headers=admin["headers"])
-    assert back.json()["theme"] == "light"
-    await client.patch("/api/v1/auth/me", headers=admin["headers"], json={"theme": "dark"})
+    assert back.json()["locale"] == "en"
+    await client.patch("/api/v1/auth/me", headers=admin["headers"],
+                       json={"locale": "ar", "preferred_currency": "EGP"})
 
 
 async def test_wrong_password_is_401_with_stable_code(client):

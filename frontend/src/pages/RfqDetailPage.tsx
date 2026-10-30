@@ -694,28 +694,28 @@ function NegotiationPanel({ rfq, offers, onDone }: { rfq: RFQDetail; offers: Com
             <div className="space-y-2">
               <div className={cn("rounded-md border p-2.5 text-xs", blocked ? "border-[color:var(--danger)]/50 bg-[color:var(--danger)]/10" : "border-[color:var(--ok)]/40 bg-[color:var(--ok)]/10")}>
                 <p className="flex items-center gap-1.5 font-semibold text-ink">
-                  {blocked ? <AlertTriangle className="size-4 text-[color:var(--danger)]" aria-hidden /> : <CheckCircle2 className="size-4 text-[color:var(--ok)]" aria-hidden />}
+                  {blocked ? <AlertTriangle className="size-4 text-[color:var(--danger-ink)]" aria-hidden /> : <CheckCircle2 className="size-4 text-[color:var(--ok-ink)]" aria-hidden />}
                   {blocked ? t("rfqs.policyBlocked") : t("rfqs.policyOk")}
                 </p>
                 {decision?.codes.length ? (
-                  <ul className="mt-1 space-y-0.5 font-mono text-2xs text-[color:var(--danger)]">
+                  <ul className="mt-1 space-y-0.5 font-mono text-2xs text-[color:var(--danger-ink)]">
                     {decision.codes.map((code) => (
                       <li key={code}>{code}</li>
                     ))}
                   </ul>
                 ) : null}
                 {decision?.reasons.length ? <p className="mt-1 text-2xs text-ink-muted">{decision.reasons.join(" · ")}</p> : null}
-                {decision?.warnings.length ? <p className="mt-1 text-2xs text-[color:var(--warn)]">{decision.warnings.join(" · ")}</p> : null}
+                {decision?.warnings.length ? <p className="mt-1 text-2xs text-[color:var(--warn-ink)]">{decision.warnings.join(" · ")}</p> : null}
                 {draft.proposed_price ? (
                   <p className="mt-1 tabular text-2xs text-ink-muted">
                     {`${t("rfqs.fields.targetPrice")}: ${money(draft.proposed_price, rfq.currency, lang)}`}
                   </p>
                 ) : null}
                 {draft.leak_violations?.length ? (
-                  <p className="mt-1 text-2xs text-[color:var(--danger)]">{draft.leak_violations.join(" · ")}</p>
+                  <p className="mt-1 text-2xs text-[color:var(--danger-ink)]">{draft.leak_violations.join(" · ")}</p>
                 ) : null}
                 {draft.injection?.length ? (
-                  <p className="mt-1 text-2xs text-[color:var(--warn)]">{`${t("agents.policy")}: ${draft.injection.join(", ")}`}</p>
+                  <p className="mt-1 text-2xs text-[color:var(--warn-ink)]">{`${t("agents.policy")}: ${draft.injection.join(", ")}`}</p>
                 ) : null}
               </div>
               <div className="rounded-md border border-line bg-surface p-3">
@@ -807,7 +807,7 @@ function VerificationDrawer({ extraction, onClose, onSaved }: { extraction: Extr
             <span className="tabular text-ink-muted">{percent(detail.data.confidence * 100)}</span>
           </div>
           {detail.data.issues.length > 0 ? (
-            <ul className="rounded-md border border-[color:var(--warn)]/40 bg-[color:var(--warn)]/10 p-2 text-2xs text-[color:var(--warn)]">
+            <ul className="rounded-md border border-[color:var(--warn)]/40 bg-[color:var(--warn)]/10 p-2 text-2xs text-[color:var(--warn-ink)]">
               {detail.data.issues.map((issue) => (
                 <li key={issue}>{issue}</li>
               ))}
@@ -842,8 +842,8 @@ function VerificationDrawer({ extraction, onClose, onSaved }: { extraction: Extr
                     />
                   </td>
                   <td className="text-2xs tabular">
-                    <span className={cn(field.low_confidence && "text-[color:var(--warn)]")}>{percent(field.confidence * 100)}</span>
-                    {field.verified_at ? <p className="text-[color:var(--ok)]">{t("common.yes")}</p> : null}
+                    <span className={cn(field.low_confidence && "text-[color:var(--warn-ink)]")}>{percent(field.confidence * 100)}</span>
+                    {field.verified_at ? <p className="text-[color:var(--ok-ink)]">{t("common.yes")}</p> : null}
                   </td>
                   <td>
                     <button type="button" className="btn-ghost text-2xs" disabled={busy} onClick={() => void verifyField(field)}>

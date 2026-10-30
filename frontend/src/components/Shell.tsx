@@ -1,64 +1,38 @@
-import {
-  Activity,
-  BarChart3,
-  Bell,
-  CheckSquare,
-  ClipboardList,
-  Factory,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  Moon,
-  Settings,
-  Sun,
-  Truck,
-  X,
-} from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Bell, Menu } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/session";
 import { useRealtime } from "@/lib/realtime";
 import { dateTime } from "@/lib/format";
 import type { AppLang } from "@/i18n";
-import type { Notification, Page } from "@/lib/types";
+import type { NotificationFeed } from "@/lib/types";
 import { Avatar, Badge, cn, EmptyState } from "./ui";
-import { Brand } from "./Brand";
-
-const NAV = [
-  { to: "/", key: "dashboard", icon: LayoutDashboard, permission: "report:read" },
-  { to: "/requests", key: "requests", icon: ClipboardList, permission: "pr:read" },
-  { to: "/rfqs", key: "rfqs", icon: Factory, permission: "rfq:read" },
-  { to: "/approvals", key: "approvals", icon: CheckSquare, permission: "approval:read" },
-  { to: "/suppliers", key: "suppliers", icon: Truck, permission: "supplier:read" },
-  { to: "/analytics", key: "analytics", icon: BarChart3, permission: "report:read" },
-  { to: "/activity", key: "agents", icon: Activity, permission: "report:read" },
-  { to: "/settings", key: "settings", icon: Settings, permission: "settings:read" },
-] as const;
+import { Sidebar } from "./Sidebar";
+import { useSidebarCollapsed } from "@/lib/nav";
 
 export function Shell() {
   const { t, i18n } = useTranslation();
-  const { user, logout, can, theme, setTheme } = useAuth();
+  const { user, logout, can } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const { collapsed, toggle } = useSidebarCollapsed();
 
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
 
   const notifications = useQuery({
     queryKey: ["notifications"],
-    queryFn: () => api.get<Page<Notification>>("/api/v1/notifications?unread_only=false&limit=20"),
+    queryFn: () => api.get<NotificationFeed>("/api/v1/notifications?unread_only=false"),
     refetchInterval: 60_000,
   });
 
-  const unread = useMemo(
-    () => (notifications.data?.items ?? []).filter((row) => !row.read_at).length,
-    [notifications.data],
-  );
+  // The endpoint returns the unread count for the tenant, not just the page of rows it just sent.
+  const unread = notifications.data?.unread ?? 0;
 
   const connected = useRealtime((event) => {
     if (event.type === "notification" || event.type === "approval.requested" || event.type === "reply.received") {
@@ -72,8 +46,6 @@ export function Shell() {
     setBellOpen(false);
   }, [location.pathname]);
 
-  const items = NAV.filter((item) => can(item.permission));
-
   const markAllRead = async () => {
     await api.post("/api/v1/notifications/read-all");
     await queryClient.invalidateQueries({ queryKey: ["notifications"] });
@@ -86,80 +58,73 @@ export function Shell() {
     localStorage.setItem("procureai.lang", next);
   };
 
-  return (
-    <div className="app-shell bg-surface">
-      <aside
-        className={cn(
-          "fixed inset-y-0 z-30 flex w-64 shrink-0 flex-col border-e border-line bg-[color:var(--navy-900)]",
-          "transition-transform lg:static lg:translate-x-0",
-          mobileOpen ? "translate-x-0" : "ltr:-translate-x-full rtl:translate-x-full lg:translate-x-0",
-        )}
-        aria-label={t("app.name")}
-      >
-        <div className="flex items-center justify-between px-4 py-4">
-          <Brand />
-          <button type="button" className="btn-ghost lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Close menu">
-            <X className="size-4" />
-          </button>
-        </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-2 pb-4">
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
-                  isActive
-                    ? "bg-gold/15 text-[color:var(--gold-300)]"
-                    : "text-[color:var(--ink-muted)] hover:bg-white/5 hover:text-ink",
-                )
-              }
-            >
-              <item.icon className="size-4" aria-hidden />
-              {t(`nav.${item.key}`)}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="border-t border-white/10 px-4 py-3 text-2xs text-[color:var(--ink-subtle)]">
-          <p>{user?.tenant.name}</p>
-          <p className="mt-0.5 uppercase tracking-widest">{user?.tenant.plan}</p>
-        </div>
-      </aside>
+  const sidebar = (
+    <Sidebar
+      can={can}
+      tenantName={user?.tenant.name ?? ""}
+      plan={user?.tenant.plan ?? ""}
+      collapsed={collapsed}
+      onToggleCollapse={toggle}
+      onNavigate={() => setMobileOpen(false)}
+      onSignOut={() => {
+        void logout().then(() => navigate("/login"));
+      }}
+    />
+  );
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-surface/90 px-3 backdrop-blur lg:px-6">
+  return (
+    <div className="app-shell">
+      {/* Desktop rail (static) */}
+      <div className="sticky top-0 hidden h-screen shrink-0 lg:block">{sidebar}</div>
+
+      {/* Mobile drawer */}
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
           <button
             type="button"
-            className="btn-ghost lg:hidden"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fadeIn"
+            aria-label={t("common.close")}
+            onClick={() => setMobileOpen(false)}
+          />
+          <div className="relative h-full w-sidebar animate-slideIn">{sidebar}</div>
+        </div>
+      ) : null}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex h-header items-center gap-2 border-b border-line bg-surface/85 px-3 backdrop-blur-md lg:px-5">
+          <button
+            type="button"
+            className="btn-ghost btn-sm lg:hidden"
             onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
+            aria-label={t("nav.open")}
           >
             <Menu className="size-4" />
           </button>
+
           <div className="flex-1" />
+
           <span
-            title={connected ? "Live" : "Polling"}
+            title={connected ? t("common.live") : t("common.polling")}
             className={cn(
-              "hidden items-center gap-1.5 text-2xs sm:flex",
-              connected ? "text-[color:var(--ok)]" : "text-ink-subtle",
+              "hidden items-center gap-1.5 text-3xs font-medium uppercase tracking-[0.14em] sm:flex",
+              connected ? "text-[color:var(--ok-ink)]" : "text-ink-subtle",
             )}
           >
             <span className={cn("size-1.5 rounded-full", connected ? "bg-[color:var(--ok)]" : "bg-line")} />
-            {connected ? "LIVE" : "POLL"}
+            {connected ? t("common.live") : t("common.polling")}
           </span>
+
           <div className="relative">
             <button
               type="button"
-              className="btn-ghost relative"
+              className="btn-ghost btn-sm relative"
               onClick={() => setBellOpen((open) => !open)}
               aria-label={t("notifications.title")}
               aria-expanded={bellOpen}
             >
               <Bell className="size-4" />
               {unread > 0 ? (
-                <span className="absolute -top-1 end-1 flex size-4 items-center justify-center rounded-full bg-gold text-[10px] font-semibold text-[color:var(--gold-contrast)]">
+                <span className="absolute -top-0.5 end-1 flex size-4 items-center justify-center rounded-full bg-gold text-[10px] font-semibold text-[color:var(--gold-contrast)]">
                   {unread > 9 ? "9+" : unread}
                 </span>
               ) : null}
@@ -182,7 +147,7 @@ export function Shell() {
                       <button
                         key={item.id}
                         type="button"
-                        className="flex w-full flex-col gap-1 border-b border-line/60 px-3 py-2 text-start hover:bg-surface-raised"
+                        className="flex w-full flex-col gap-1 border-b border-line/60 px-3 py-2 text-start transition-colors hover:bg-surface-raised"
                         onClick={async () => {
                           await api.post(`/api/v1/notifications/${item.id}/read`);
                           await queryClient.invalidateQueries({ queryKey: ["notifications"] });
@@ -201,37 +166,32 @@ export function Shell() {
               </div>
             ) : null}
           </div>
-          <button type="button" className="btn-ghost" onClick={() => changeLang(lang === "ar" ? "en" : "ar")}>
-            {lang === "ar" ? "EN" : "ع"}
-          </button>
+
           <button
             type="button"
-            className="btn-ghost"
-            aria-label={t("common.theme")}
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="btn-ghost btn-sm text-2xs font-semibold uppercase tracking-wider"
+            onClick={() => changeLang(lang === "ar" ? "en" : "ar")}
+            aria-label={t("common.language")}
+            title={t("common.language")}
           >
-            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            {lang === "ar" ? "EN" : "ع"}
           </button>
+
           <div className="ms-1 flex items-center gap-2 border-s border-line ps-2">
             <Avatar name={user?.full_name ?? "?"} />
             <div className="hidden leading-tight sm:block">
-              <p className="text-xs font-medium text-ink">{lang === "ar" && user?.full_name_ar ? user.full_name_ar : user?.full_name}</p>
-              <p className="text-2xs text-ink-subtle">{user?.roles.join(" · ")}</p>
+              <p className="text-xs font-medium text-ink">
+                {lang === "ar" && user?.full_name_ar ? user.full_name_ar : user?.full_name}
+              </p>
+              <p className="text-3xs uppercase tracking-[0.12em] text-ink-subtle">{user?.roles.join(" · ")}</p>
             </div>
-            <button
-              type="button"
-              className="btn-ghost"
-              aria-label={t("common.signOut")}
-              onClick={() => {
-                void logout().then(() => navigate("/login"));
-              }}
-            >
-              <LogOut className="size-4" />
-            </button>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
-          <Outlet />
+
+        <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4 lg:px-6 lg:py-6">
+          <div className="mx-auto w-full max-w-[1440px]">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
@@ -243,16 +203,19 @@ export function PageHeading({
   subtitle,
   actions,
   children,
+  eyebrow,
 }: {
   title: string;
   subtitle?: string;
   actions?: React.ReactNode;
   children?: React.ReactNode;
+  eyebrow?: string;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-xl font-semibold text-ink">{title}</h1>
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        {eyebrow ? <p className="eyebrow mb-1">{eyebrow}</p> : null}
+        <h1 className="truncate text-[1.375rem] font-semibold leading-tight text-ink">{title}</h1>
         {subtitle ? <p className="mt-1 text-sm text-ink-muted">{subtitle}</p> : null}
         {children}
       </div>

@@ -9,6 +9,8 @@ import RfqBoardPage from "./pages/RfqBoardPage";
 import RfqDetailPage from "./pages/RfqDetailPage";
 import ApprovalsPage from "./pages/ApprovalsPage";
 import SuppliersPage from "./pages/SuppliersPage";
+import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -52,6 +54,8 @@ export default function App() {
         <Route path="/rfqs" element={<RfqBoardPage />} />
         <Route path="/rfqs/:id" element={<RfqDetailPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
+        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/activity" element={<ActivityPage />} />

@@ -1,225 +1,141 @@
-# ProcureAI — multi-tenant AI procurement platform
+# Navy-only institutional redesign + post-PO lifecycle (receipts → 3-way match → settlement)
 
-**Branch:** `arena/80427d61-mantiq-agent` → `main`
-**Scope:** the complete platform from the master build prompt — backend, frontend, agent, adapters,
-seed data, tests, docs, deployment and CI.
+Two bodies of work on one branch:
 
-> **The LLM proposes, the policy engine disposes.** The agent cannot accept, sign, pay or change
-> specifications; a human approval chain is the only path to a purchase order.
+1. **Visual overhaul** — the app now ships **one** theme (Mantiq navy + gold), the light theme and
+   every trace of the theme toggle are gone, and the shell/navigation were rebuilt to a denser,
+   more institutional standard.
+2. **Post-PO lifecycle** — goods receipts with warehouse + requester sign-off, a deterministic
+   three-way match, human invoice approval, payment *suggestion*, and a supplier ledger with
+   outstanding/overdue balances. Built API → services → models → adapters → tests, with the agent
+   kept out of every one of those mutations.
 
----
+## What changed
 
-## 1. What is in this PR
+### Design — one theme, no toggle
 
-| Area | Contents |
+| Before | After |
 | --- | --- |
-| `backend/app` | FastAPI app, 146 REST operations + WebSocket, SQLAlchemy 2 async models, 12-step Alembic chain, agent graph, 12 audited tools, deterministic policy engine, 9 adapter families (real + Fake), Celery worker/beat, Argon2id auth with TOTP MFA, audit log, RBAC, envelope encryption, rate limiting |
-| `backend/tests` | 26 files, **464 tests**: unit, service, API, security, agent, guardrails, injection corpus, 150-case extraction harness |
-| `frontend/src` | React 18 + Vite + TS strict, 13 pages over 12 routes, Mantiq navy/gold design system, AR-RTL default + EN, dark/light, 4 vitest suites (24 tests) |
-| `deploy/` | `Dockerfile.api`, `Dockerfile.worker`, `Dockerfile.web` + nginx, `docker-compose.yml` (Postgres 16 + pgvector, Redis, MinIO, OTel), Helm chart with HPA/PDB/ingress, `.env.example` |
-| `.github/workflows/ci.yml` | backend (ruff → alembic → pytest ≥80%), frontend (typecheck/lint/test/build), container builds, `helm lint`/`helm template`, advisory security scans |
-| `docs/` | `ARCHITECTURE`, `DECISIONS` (30 ADRs), `TRACEABILITY`, `SECURITY`, `RUNBOOK`, `API`, `DESIGN_SYSTEM`, `AGENT_DESIGN`, `PROGRESS`, this file |
+| `[data-theme]` light/dark blocks in `tokens.css`, `darkMode` in Tailwind, `theme`/`setTheme` in `session.tsx`, a Sun/Moon button in the shell, `common.theme`/`common.dark`/`common.light` strings, `User.theme` | Single navy token set; `theme`/`numerals` removed from the API payload and dropped from the database (`0014_drop_theme_preference`); `index.html` no longer sets `data-theme` |
 
-Sizes: 64 app modules / 14 870 lines of backend code, 4 652 lines of tests, 33 frontend sources /
-6 855 lines.
+* **Tokens** (`src/styles/tokens.css`) — explicit surface ladder (`--surface-sunken` → `--surface` →
+  `--surface-alt` → `--surface-raised`), a dedicated rail palette (`--sidebar*`), three shadows
+  (`--shadow-1/2/3`) with an inset top highlight so cards read as light rather than as borders,
+  radius/motion/`--focus-ring` tokens, thin scrollbars, gold selection, and the `prefers-reduced-motion`
+  kill-switch the constraints require.
+* **Contrast is now measured, not assumed.** The saturated semantic colours are 2.4–4.3:1 as text on
+  the card surface, so they are fill/border/chart colours only; text uses new `--ok-ink`,
+  `--warn-ink`, `--danger-ink`, `--info-ink` (5.7–8.2:1). Body text is 15.4:1, muted 7.7:1, subtle
+  4.46:1, gold-on-navy 10.9:1, gold fill with `--gold-contrast` 7.2:1. All measured pairs are listed
+  in `docs/DESIGN_SYSTEM.md` §7. No colour family outside navy + gold + ok/warn/danger/info.
+* **Sidebar** (`components/Sidebar.tsx`, `lib/nav.ts`) — grouped navigation (Overview / Sourcing /
+  Fulfilment / Insight), gold active rail drawn with a logical `start-0` pseudo-element so RTL
+  mirrors for free, collapse to a 72px icon rail persisted in `localStorage`, 40px collapsed targets,
+  `aria-label` on every icon-only link, tenant plate in the footer, hairline separators instead of
+  labels when collapsed, mobile drawer with backdrop.
+* **Shell** — 56px translucent top bar, live/polling indicator from the WebSocket hub, notification
+  popover with mark-read/mark-all-read wired to the real endpoints, locale toggle, avatar/role block,
+  content max-width container. `PageHeading` gained an eyebrow line and consistent spacing rhythm.
+* Every old page inherits the new `.card`, `.btn-*`, `.input`, `.chip`, `.table-dense` component
+  classes, so the redesign is not limited to the new screens.
 
-## 2. Requirements coverage (see `docs/TRACEABILITY.md` for the full matrix)
+### Post-PO lifecycle
 
-* **Intake (FR-IN)** — text/Excel/e-mail/WhatsApp/voice-note ingestion, clarification loop, UNSPSC
-  normalisation, submission with completeness gating.
-* **RFQ (FR-RFQ)** — drafting, shortlist dispatch per channel, reminders, auto-expiry, kanban stages
-  (`draft → dispatched → open → closed`), tokenised no-login supplier form.
-* **Extraction (FR-EX)** — per-field provenance and confidence, disagreement detection,
-  prompt-injection flagging, human field verification, 150-case harness at ≥95% field accuracy.
-* **Comparison (FR-CMP)** — landed cost (freight, duty, FX), TCO, weighted scoring within ±5 % of 1.0,
-  matrix, recommendation whose numbers are re-validated against the computed ranking.
-* **Negotiation (FR-NEG)** — versioned policy (target/walk-away/rounds/concessions/tone/mode),
-  draft → policy decision → human send, send-time revalidation, timeline, competitor-leak scanning.
-* **Approvals (AC)** — amount/role-banded chains, sequential steps, reject / revision / delegate /
-  escalate / split award, audit trail; only `finalize_award` issues a PO.
-* **Suppliers (FR-SUP)** — master data, encrypted contacts, certifications, ratings, discovery runs
-  with a human approval gate.
-* **Analytics (FR-RPT)** — KPIs, spend by category/supplier, savings by buyer, forecast with stated
-  method, Excel export.
-* **Non-functional** — 80 % coverage floor enforced in CI, rate limiting, idempotency keys,
-  RFC 9457 problem responses, request-id propagation, tenancy isolation asserted by
-  `second_tenant` fixtures, WCAG 2.1 AA checklist, `prefers-reduced-motion`.
+**Models** (`app/db/models/entities.py`): `GoodsReceipt`, `SupplierInvoice`, `SupplierLedgerEntry`,
+`PurchaseOrder.closed_at`.
 
-## 3. Verification — real output from this workspace
+**Services**
+* `app/services/receiving.py` — `create_receipt` (per-line received/accepted/rejected, over-receipt
+  and negative-quantity rejection), `confirm_receipt` (requester checks quantity/quality/spec,
+  reject requires a comment), `recompute_po_status`, `close_po`, `timeline`, `outstanding_lines`.
+* `app/services/invoicing.py` — `create_invoice`, `compute_match` (the three-way match),
+  `approve_invoice`, `record_payment`, `suggest_payment`, `supplier_balance`, `supplier_balances`.
 
-### Backend tests + coverage
+**API** (`app/api/v1/orders.py`, tag `orders`) — PO list/detail with lifecycle, receipts, receipt
+confirmation, invoices, re-match, approval, payment recording, supplier balances, and the PO
+PDF/Excel/ERP hand-off moved out of the RFQ router.
 
-```
-$ cd backend && pytest tests --cov=app
-........................................................................ [ 15%]
-........................................................................ [ 31%]
-........................................................................ [ 46%]
-........................................................................ [ 62%]
-........................................................................ [ 77%]
-........................................................................ [ 93%]
-................................                                         [100%]
-Name                                Stmts   Miss  Cover   Missing
-...
-app/services/analytics.py             176      2    99%
-app/services/approval.py              187      6    97%
-app/services/negotiation.py           141      5    96%
-app/services/po.py                     80      3    96%
-app/services/seed.py                  122      0   100%
-app/services/voice.py                  77      0   100%
-app/workers/tasks.py                   89      0   100%
------------------------------------------------------------------
-TOTAL                                8228   1319    84%
-464 passed in 41.49s
-```
+**RBAC** — new permissions `po:read`, `po:update`, `receipt:create`, `receipt:confirm`,
+`invoice:create`, `invoice:approve`, `payment:record`, `ledger:read`, and a `warehouse`
+(Warehouse / Stores) role that has `receipt:create` **and not** `receipt:confirm`. Separation of
+duties is a permission, not a convention; a 403 carries `required_permission`.
 
-Regression-test inventory (collect-only):
+**Frontend** — `pages/PurchaseOrdersPage.tsx` (status filter, open/awaiting-receipt/awaiting-requester
+KPIs, outstanding strip, supplier balance table) and `pages/PurchaseOrderDetailPage.tsx` (gold
+lifecycle stepper, ordered vs received vs available per line, receipt timeline, invoice drawer,
+three-way match table with variance %, mismatch issue list, approve drawer with mandatory override
+reason, payment drawer with the deterministic suggestion and its reasons, supplier ledger card).
 
-```
-tests/test_negotiation_guardrails.py: 122
-tests/test_injection_corpus.py: 86
-tests/test_api_admin.py: 26
-tests/test_numbers.py: 22
-tests/test_adapters.py: 18
-tests/test_policy_engine.py: 17
-tests/test_services_approval_auth.py: 15
-tests/test_taxonomy.py: 14
-tests/test_api_identity.py: 13
-tests/test_services_extraction.py: 12
-tests/test_agents_graph.py: 11
-tests/test_services_negotiation.py: 11
-tests/test_services_privacy_portal.py: 10
-tests/test_services_voice.py: 10
-tests/test_api_intake.py: 9
-tests/test_services_analytics.py: 9
-tests/test_services_award_discovery.py: 9
-tests/test_services_governance.py: 9
-tests/test_api_rfq_lifecycle.py: 8
-tests/test_workers.py: 7
-tests/test_cli.py: 6
-tests/test_public_portal.py: 6
-tests/test_api_flow.py: 5
-tests/test_extraction_harness.py: 5
-tests/test_api_rfq_surface.py: 4
-```
+### The safety model still holds: LLM proposes, policy + human decide
 
-### Lint and migrations
+* `STAGES` still ends at `approval`. Receiving, matching, approving and paying are **not** agent
+  stages and have **no** tools.
+* The three-way match is pure arithmetic: invoiced quantity is capped by the *confirmed* receipt
+  (never by the raw warehouse entry), previously invoiced quantities are subtracted so partial
+  invoicing cannot double-bill, and the price is compared with the PO line inside a per-line 0.5%
+  tolerance.
+* `approve_invoice` refuses a non-matching invoice unless a written `override_reason` is supplied;
+  the text lands in the invoice notes and the audit row records `overridden: true`.
+* `suggest_payment` is rule-based (currency vs tenant currency, supplier country, value, preferred
+  status, due date) and every result carries `requires_human_approval: true` and
+  `execution: "outside_platform"`. `record_payment` books a transfer that already happened (mandatory
+  external reference, no overpayment) — nothing in the codebase can move money.
+* New regression test: `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool`
+  fails the build if `record_payment`, `approve_invoice`, `pay_invoice`, `execute_payment`,
+  `create_invoice`, `confirm_receipt`, `accept_delivery` or `close_po` is ever registered as a tool.
 
-```
-$ cd backend && ruff check app tests
+## Verification (real output)
+
+```text
+$ cd backend && python -m pytest tests --cov=app
+513 passed in 38.75s
+TOTAL                                8916   1335    85%
+  app/api/v1/orders.py                  234      6    97%
+  app/services/invoicing.py             242     14    94%
+  app/services/receiving.py             163     10    94%
+
+$ python -m alembic upgrade head && python -m alembic check
+Running upgrade 0013_post_po_lifecycle -> 0014_drop_theme_preference
+No new upgrade operations detected.
+
+$ ruff check app tests
 All checks passed!
 
-$ cd backend && alembic current && alembic check
-0012_bootstrap_seed_reference_data (head)
-No new upgrade operations detected.
+$ cd frontend && npm run typecheck && npm run lint && npm run test && npm run build
+tsc --noEmit                        OK
+eslint . --max-warnings 0           OK
+Tests  27 passed (27)
+✓ built in 5.61s   (index 393.67 kB / 106.47 kB gzip, charts chunk 407.41 kB / 110.02 kB gzip)
 ```
 
-### Frontend
+New tests: `tests/test_services_receiving.py` (17), `tests/test_services_invoicing.py` (20),
+`tests/test_api_post_po.py` (12, full HTTP cycle receipt → confirm → invoice → approve → pay → close),
+plus the two post-award frontend tests in `frontend/src/pages/pages.test.tsx`.
 
-```
-$ npm run typecheck          # tsc --noEmit
-(no output — 0 errors)
+Live check against the running stack (SQLite + uvicorn + vite), demo tenant `nile`:
 
-$ npm run lint               # eslint . --max-warnings 0
-(no output — 0 problems)
-
-$ npm run test
- ✓ src/pages/pages.test.tsx (4 tests)
- ✓ src/components/ui.test.tsx (7 tests)
- ✓ src/lib/format.test.ts (10 tests)
- ✓ src/i18n/i18n.test.ts (3 tests)
- Test Files  4 passed (4)
-      Tests  24 passed (24)
-
-$ npm run build
-dist/assets/react-PaxvfrL8.js     164.60 kB │ gzip:  53.70 kB
-dist/assets/index-2PkswWOU.js     346.41 kB │ gzip:  96.33 kB
-dist/assets/charts-1jBeNFW4.js    407.41 kB │ gzip: 110.02 kB
-✓ built in 6.82s
+```text
+GET /api/v1/purchase-orders            PO-2026-00001  10,141,000.00 EGP  status=confirmed
+GET /api/v1/purchase-orders/{id}       receipts: GR-2026-00001 (confirmed), GR-2026-00002 (confirmed)
+                                       invoice: INV-00001 partially_paid 6,121,000 / paid 2,448,400
+                                       match: matched, 2/2 lines ok, tolerance 0.5%
+GET /api/v1/supplier-balances          Suez Metal Works outstanding 3,672,600.00 EGP, overdue 0, 1 open invoice
 ```
 
-### Live smoke test (dev servers running)
+## Documentation
 
-```
-$ curl -s localhost:8000/health
-{"status":"ok","app":"ProcureAI","env":"dev","version":"1.0.0"}
+`docs/DESIGN_SYSTEM.md` (single theme, palette, measured contrast, rail behaviour, new screens),
+`docs/AGENT_DESIGN.md` (forbidden post-award verbs + “the post-award loop has no agent”),
+`docs/DECISIONS.md` (#31–#40), `docs/API.md` (post-award walkthrough + regenerated 158-operation
+inventory), `docs/PROGRESS.md`, `docs/TRACEABILITY.md` (FR-PO-2…6, AC-PO-2…4, NFR-UX-1).
 
-$ POST /api/v1/auth/login (buyer@nile.example.com)     -> 200
-$ GET  /api/v1/rfqs?page_size=2                        -> 200 {items, total, page}
-$ GET  /api/v1/requests?page_size=2                    -> 200 {items, total, page}
-$ GET  /api/v1/suppliers?page_size=2                   -> 200 {items, total, page}
-$ GET  /api/v1/analytics/kpis                          -> 200 {rfqs_total, offers_total, ...}
-$ GET  http://localhost:5173/                          -> 200
-```
+## Honest limits
 
-Full lifecycle (intake → dispatch → reply → extract → compare → policy → negotiate → approve → PO)
-is exercised end-to-end by `tests/test_api_flow.py` and `tests/test_api_rfq_lifecycle.py` against the
-real app with a real migrated database.
-
-### CI on this branch — all five jobs green
-
-Run [`41098250455`](https://github.com/DevMagdi/Mantiq-Agent/actions/runs/41098250455) at `61ce98c`:
-
-| Job | Result | Duration |
-| --- | --- | --- |
-| Backend (lint, migrate, tests, coverage) | pass | 1m 12s |
-| Frontend (typecheck, lint, tests, build) | pass | 37s |
-| Container images build (api, worker, web) | pass | 1m 58s |
-| Helm chart lint (`helm lint` + `helm template`) | pass | 6s |
-| Secrets & dependency scan | pass | 29s |
-
-That first red run was useful: it exposed that the backend was **not installable** — setuptools
-flat-layout discovery aborted on multiple top-level packages, and `typer`, `cryptography`, `pyyaml`
-and `email-validator` were imported but undeclared. A warm local virtualenv had hidden all of it.
-Fixed in `fix(build)`, then verified from an empty virtualenv: `pip install -e ".[dev]"`,
-`procureai --help`, `alembic upgrade head`, `alembic check` and `pytest` all succeed on the newest
-resolved dependency versions (FastAPI 0.162, SQLAlchemy 2.1, pytest 9.2).
-
-## 4. Safety-critical behaviour (with tests)
-
-| Guarantee | Proof |
-| --- | --- |
-| Agent cannot accept/sign/pay/change specs — the verbs are absent and an import-time assert refuses them | `tests/test_agents_graph.py` |
-| 40-payload prompt-injection corpus cannot change commercial state | `tests/test_injection_corpus.py` (86 cases) |
-| Negotiation decisions match an independent policy oracle | `tests/test_negotiation_guardrails.py` (122 cases) |
-| Competitor names/prices never leave in a counter-offer | `tests/test_services_negotiation.py` |
-| AI voice states it is AI first; recording requires consent; refused consent discards the recording | `tests/test_services_voice.py` |
-| No award without a fully approved chain; PO only after human approval | `tests/test_services_governance.py` |
-| Auth: Argon2id, lockout, MFA, rotating refresh tokens, RBAC matrix | `tests/test_services_approval_auth.py`, `tests/test_api_identity.py` |
-
-## 5. Decisions worth reviewing
-
-All 30 are in `docs/DECISIONS.md`; the ones a reviewer is most likely to question:
-
-1. **Graph runner instead of LangGraph** — same auditability and human interrupts, fewer moving
-   parts (`docs/AGENT_DESIGN.md` §8).
-2. **Deterministic policy engine separate from the LLM** — the LLM writes prose and proposes a price;
-   `evaluate_outgoing` is the only authority on sending (ADR 12).
-3. **SQLite in CI, PostgreSQL in production** — dialect-guarded DDL (citext/pgvector/RLS) with a
-   single migration chain that runs on both; limitations are listed in `docs/PROGRESS.md` (ADR 1).
-4. **Envelope encryption per tenant** with `key_id` on every ciphertext so data keys can be
-   re-wrapped without re-encrypting business rows (`docs/SECURITY.md` §3).
-5. **In-process WebSocket hub** — correct for a single replica; multi-replica fan-out is documented
-   as the next step rather than pretended (WebSocket section of `docs/API.md`).
-
-## 6. Known limitations (also in `docs/PROGRESS.md`)
-
-* Real SMTP / Meta WhatsApp / Twilio / SerpAPI / Odoo / Stripe / OCR / STT clients are implemented
-  but cannot be exercised in this sandbox — only their Fakes run in CI.
-* PostgreSQL-only features (RLS enforcement, `pg_trgm` ranking, pgvector similarity) are enabled in
-  production and unit-tested at the boundary, not executed here.
-* No browser E2E (Playwright) run: the UI is verified by build + typecheck + ESLint + 24 component
-  tests.
-* `app/agents/llm/providers.py` (23 %) and `app/services/erp_service.py` (43 %) are the least-covered
-  modules because their network paths are excluded by design.
-* Arabic PO PDFs render but not with the display font — needs an embedded Arabic subset.
-
-## 7. Reviewer checklist
-
-```bash
-cd backend && pytest tests --cov=app && ruff check app tests && alembic upgrade head && alembic check
-cd frontend && npm ci && npm run typecheck && npm run lint && npm run test && npm run build
-# demo data
-cd backend && procureai migrate && procureai bootstrap --demo && procureai seed-demo
-```
-
-Login `buyer@nile.example.com` / `Demo!Pilot2026` (tenant `nile`).
+* No browser E2E run: there is no Playwright/browser in this environment. The UI is verified by the
+  production build, `tsc`, ESLint and 27 component/interaction tests; the API was exercised live with
+  curl against the seeded demo tenant.
+* No real payment execution, by design. The bank/ERP integration that performs a transfer is out of
+  scope; the platform records the transfer that finance already made.
+* SQLite only in this sandbox — Postgres-specific paths (RLS, pgvector) remain guarded and untested
+  here, as before.
+* The analytics page is still not lazily imported; the post-award screens ship in the main chunk.

@@ -76,10 +76,66 @@ GET  /api/v1/purchase-orders/{id}
 GET  /api/v1/purchase-orders/{id}/pdf
 ```
 
+## Post-award lifecycle (delivery → three-way match → settlement)
+
+The award creates the purchase order. Everything after it is a *human* loop: the warehouse records
+what arrived, the requester confirms it matches the need, and finance approves a matched invoice
+before any payment is recorded. No endpoint here executes a payment.
+
+```bash
+# 1. delivery (po:update, then receipt:create)
+POST /api/v1/purchase-orders/{po_id}/ship            ?carrier=Nile%20Logistics
+POST /api/v1/purchase-orders/{po_id}/receipts        {"warehouse": "Alexandria central stores",
+                                                      "delivery_note_ref": "DN-88510",
+                                                      "carrier": "Nile Logistics",
+                                                      "lines": [{"line_no": 1, "received_qty": "200",
+                                                                 "accepted_qty": "200", "rejected_qty": "0"}]}
+GET  /api/v1/purchase-orders/{po_id}/receipts
+
+# 2. the requesting team signs off (receipt:confirm) — the warehouse cannot confirm its own receipt
+POST /api/v1/receipts/{receipt_id}/confirm           {"decision": "confirm", "quantity_ok": true,
+                                                      "quality_ok": true, "spec_ok": true,
+                                                      "documents_ok": true, "comment": "Matches the spec"}
+
+# 3. invoice + three-way match (invoice:create) — partial receipts stay invoiceable
+POST /api/v1/purchase-orders/{po_id}/invoices        {"number": "INV-00001", "due_date": "2026-11-26",
+                                                      "lines": [{"line_no": 1, "quantity": "200",
+                                                                 "unit_price": "20100"}]}
+POST /api/v1/invoices/{invoice_id}/match             # re-run the deterministic match
+
+# 4. human approval for payment (invoice:approve); a mismatch needs an explicit override_reason
+POST /api/v1/invoices/{invoice_id}/approve           {"comment": "Checked against the GR"}
+POST /api/v1/invoices/{invoice_id}/approve           {"override_reason": "Supplier corrected the unit price"}
+
+# 5. bookkeeping for a transfer executed in the bank/ERP (payment:record) — no money moves here
+POST /api/v1/invoices/{invoice_id}/payments          {"amount": "2448400", "method": "bank_transfer",
+                                                      "reference": "CIB-TRF-90211", "note": "First instalment"}
+
+# 6. balances and closure
+GET  /api/v1/supplier-balances
+GET  /api/v1/suppliers/{supplier_id}/balance
+POST /api/v1/purchase-orders/{po_id}/close           # only after the requester confirmed
+```
+
+**Status model.** `issued → in_transit → partially_received → received → confirmed → closed`.
+`received` means the warehouse has the goods; `confirmed` means the requesting team accepted them.
+Invoices are `matched | mismatched | approved | partially_paid | paid | disputed`.
+
+**Match issue codes** (returned in `match_result.issues`, so a UI never has to guess):
+`QTY_EXCEEDS_RECEIPT`, `PRICE_VARIANCE`, `NO_CONFIRMED_RECEIPT`, `UNKNOWN_LINE`,
+`CURRENCY_MISMATCH`, `SUBTOTAL_MISMATCH`, `TOTAL_MISMATCH`, `INVALID_QUANTITY`. The default price
+tolerance is 0.5% per line; over-invoicing beyond the confirmed quantity is always a mismatch.
+
+**Payment suggestion.** `match_result` and `payment_suggestion` are computed deterministically from
+the invoice, the supplier record and tenant policy (`bank_transfer | swift_wire | letter_of_credit`).
+Every suggestion carries `requires_human_approval: true`, `execution: "outside_platform"` and a
+reason list (`PREFERRED_SUPPLIER`, `OVERDUE`, `CROSS_BORDER_HIGH_VALUE`, …). There is no endpoint
+that pays, and the agent has no tool that can reach one.
+
 ## Endpoint inventory
 
 The table below is generated from the live OpenAPI schema of the running application
-(146 operations).
+(158 operations).
 
 | Method | Path | Summary | Tag |
 | --- | --- | --- | --- |
@@ -105,7 +161,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/auth/login` | Email + password sign-in (TOTP challenge when enabled) | identity |
 | POST | `/api/v1/auth/logout` | Revoke the current refresh session | identity |
 | GET | `/api/v1/auth/me` | Current user, tenant, permissions and preferences | identity |
-| PATCH | `/api/v1/auth/me` | Update profile and preferences (theme, locale, numerals) | identity |
+| PATCH | `/api/v1/auth/me` | Update profile and preferences (locale, currency, name) | identity |
 | POST | `/api/v1/auth/mfa/disable` | Disable MFA (requires a valid code) | identity |
 | POST | `/api/v1/auth/mfa/enable` | Confirm TOTP enrolment (returns one-time backup codes) | identity |
 | POST | `/api/v1/auth/mfa/setup` | Start TOTP enrolment (returns otpauth URI + secret) | identity |
@@ -123,8 +179,8 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/billing/usage` | Usage metering against plan limits | admin |
 | GET | `/api/v1/billing/usage-export` | Export usage events (CSV) | admin |
 | GET | `/api/v1/categories` | List tenant categories | intake |
-| POST | `/api/v1/comments` | Comment on an RFQ/PR with @mentions | admin |
 | GET | `/api/v1/comments` | List comments for an RFQ or PR | admin |
+| POST | `/api/v1/comments` | Comment on an RFQ/PR with @mentions | admin |
 | GET | `/api/v1/dashboard` | Dashboard payload (KPIs, spend, trends, forecast) | admin |
 | GET | `/api/v1/data-export` | Data-subject export (JSON bundle) | admin |
 | GET | `/api/v1/erasure-requests` | List erasure requests | admin |
@@ -148,6 +204,9 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/integrations` | Integration configuration (secrets masked) | admin |
 | POST | `/api/v1/integrations` | Configure an integration (secrets envelope-encrypted) | admin |
 | POST | `/api/v1/integrations/{kind}/test` | Test an integration | admin |
+| POST | `/api/v1/invoices/{invoice_id}/approve` | Human approval of a matched invoice | orders |
+| POST | `/api/v1/invoices/{invoice_id}/match` | Re-run the three-way match | orders |
+| POST | `/api/v1/invoices/{invoice_id}/payments` | Record a payment executed outside the platform | orders |
 | GET | `/api/v1/limits` | Approval limits per role and category (FR-AUTH-3) | identity |
 | POST | `/api/v1/limits` | Upsert an approval limit | identity |
 | GET | `/api/v1/llm-config` | Per-tenant LLM provider (including self-hosted) | admin |
@@ -169,11 +228,18 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/public/form/{token}/upload` | Attach a file to a public quote | admin |
 | GET | `/api/v1/public/supplier/{token}` | Supplier self-service profile page | admin |
 | POST | `/api/v1/public/supplier/{token}` | Supplier profile confirmation / catalogue upload | admin |
-| GET | `/api/v1/purchase-orders` | List purchase orders | rfq |
-| GET | `/api/v1/purchase-orders/{po_id}` | Purchase order detail | rfq |
-| GET | `/api/v1/purchase-orders/{po_id}/excel` | Download the PO as Excel | rfq |
-| POST | `/api/v1/purchase-orders/{po_id}/export-erp` | Push the PO to the ERP connector | rfq |
-| GET | `/api/v1/purchase-orders/{po_id}/pdf` | Download the PO as PDF | rfq |
+| GET | `/api/v1/purchase-orders` | List purchase orders | orders |
+| GET | `/api/v1/purchase-orders/{po_id}` | Purchase order detail with the delivery lifecycle | orders |
+| POST | `/api/v1/purchase-orders/{po_id}/close` | Close a fully confirmed purchase order | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/excel` | Download the PO as Excel | orders |
+| POST | `/api/v1/purchase-orders/{po_id}/export-erp` | Push the PO to the ERP connector | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/invoices` | Supplier invoices for a purchase order | orders |
+| POST | `/api/v1/purchase-orders/{po_id}/invoices` | Record a supplier invoice and run the three-way match | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/pdf` | Download the PO as PDF | orders |
+| GET | `/api/v1/purchase-orders/{po_id}/receipts` | Goods receipts for a purchase order | orders |
+| POST | `/api/v1/purchase-orders/{po_id}/receipts` | Record a goods receipt at the warehouse | orders |
+| POST | `/api/v1/purchase-orders/{po_id}/ship` | Mark the purchase order as shipped by the supplier | orders |
+| POST | `/api/v1/receipts/{receipt_id}/confirm` | Requester confirms the received items match the need | orders |
 | GET | `/api/v1/requests` | List purchase requisitions | intake |
 | GET | `/api/v1/requests/{pr_id}` | Requisition detail with lines and open questions | intake |
 | POST | `/api/v1/requests/{pr_id}/clarifications/{question_id}/answer` | Answer or waive a clarification | intake |
@@ -184,8 +250,8 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/rfqs` | List RFQs | rfq |
 | POST | `/api/v1/rfqs` | Create an RFQ from a requisition | rfq |
 | GET | `/api/v1/rfqs/board` | Kanban board grouped by stage with deadline chips | rfq |
-| PATCH | `/api/v1/rfqs/{rfq_id}` | Update RFQ settings / move stage on the board | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}` | RFQ detail (lines, invitations, offers, messages, policy) | rfq |
+| PATCH | `/api/v1/rfqs/{rfq_id}` | Update RFQ settings / move stage on the board | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/close` | Close an RFQ | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}/comparison` | Offer comparison matrix with TCO and weighted scores | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/dispatch` | Send the RFQ to invited suppliers (email/WhatsApp/web link) | rfq |
@@ -193,8 +259,8 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/rfqs/{rfq_id}/messages` | Thread timeline for an RFQ (all suppliers) | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/messages` | Send a manual message to a supplier | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/negotiate` | Draft (and optionally send) a policy-checked counter-offer | rfq |
-| PUT | `/api/v1/rfqs/{rfq_id}/policy` | Create a versioned negotiation policy | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}/policy` | Active negotiation policy | rfq |
+| PUT | `/api/v1/rfqs/{rfq_id}/policy` | Create a versioned negotiation policy | rfq |
 | GET | `/api/v1/rfqs/{rfq_id}/preview` | Template preview (AR/EN) before sending | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/recommend` | Top-3 recommendation with traceable justification | rfq |
 | POST | `/api/v1/rfqs/{rfq_id}/reminders` | Run the reminder cadence for this RFQ | rfq |
@@ -206,6 +272,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/roles` | Role catalogue with the permission matrix (UI mirror of RBAC) | identity |
 | GET | `/api/v1/settings` | Tenant settings | admin |
 | PATCH | `/api/v1/settings` | Update tenant settings | admin |
+| GET | `/api/v1/supplier-balances` | Outstanding balance per supplier | orders |
 | GET | `/api/v1/suppliers` | List/search suppliers | intake |
 | POST | `/api/v1/suppliers` | Create a supplier | intake |
 | POST | `/api/v1/suppliers/discovery` | Run autonomous supplier discovery | intake |
@@ -214,6 +281,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | GET | `/api/v1/suppliers/discovery/{job_id}` | Discovery job results | intake |
 | POST | `/api/v1/suppliers/import` | Bulk import suppliers from Excel/CSV | intake |
 | GET | `/api/v1/suppliers/{supplier_id}` | Supplier detail with contacts (PII decrypted for authorised users) | intake |
+| GET | `/api/v1/suppliers/{supplier_id}/balance` | Ledger and balance for one supplier | orders |
 | POST | `/api/v1/suppliers/{supplier_id}/certifications` | Add a certification | intake |
 | POST | `/api/v1/suppliers/{supplier_id}/flags` | Blacklist / prefer / approve a supplier | intake |
 | POST | `/api/v1/suppliers/{supplier_id}/portal-link` | Signed, expiring supplier self-service link | intake |

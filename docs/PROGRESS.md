@@ -6,7 +6,7 @@ implemented, what is proven by a test, and what genuinely does not exist yet.
 Verification commands used for this snapshot (real output in `docs/PR_DESCRIPTION.md`):
 
 ```bash
-cd backend && pytest tests -q --cov=app        # 464 tests, 0 failures, 84% coverage
+cd backend && pytest tests -q --cov=app        # 513 tests, 0 failures, 85% coverage
 cd backend && ruff check app tests             # clean
 cd backend && alembic upgrade head && alembic check
 cd frontend && npm run typecheck && npm run lint && npm run test && npm run build
@@ -26,6 +26,12 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Negotiation | versioned policy, drafting, guardrail decisions, send-time revalidation, timeline | `tests/test_services_negotiation.py`, `tests/test_negotiation_guardrails.py` |
 | Approvals | banded chain, sequential steps, reject / revision / delegate / escalate / split award | `tests/test_services_approval_auth.py`, `tests/test_services_governance.py` |
 | Purchase orders | numbering, lines, PDF, Excel, ERP export | `tests/test_api_rfq_surface.py` |
+| Goods receipts | warehouse receipt with per-line received/accepted/rejected, carrier, delivery note, over-receipt guard | `tests/test_services_receiving.py` (17), `tests/test_api_post_po.py` |
+| Delivery sign-off | requester confirmation (quantity/quality/spec/documents), reject with mandatory comment, PO cannot close before it | `tests/test_services_receiving.py`, `tests/test_api_post_po.py` |
+| Three-way match | PO ↔ confirmed receipt ↔ invoice, partial receipts and partial invoicing, 8 issue codes, 0.5% per-line price tolerance | `tests/test_services_invoicing.py` (20), `tests/test_api_post_po.py` |
+| Invoice approval | human approval only; a mismatch requires a written override reason that is audited | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` |
+| Payment suggestion | deterministic method/terms/priority with reason codes, always `requires_human_approval` and `execution: outside_platform` | `tests/test_services_invoicing.py` |
+| Supplier ledger | invoice/payment entries, outstanding and overdue balances per supplier, no overpayment | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` |
 | Analytics | KPIs, spend by category/supplier, savings by buyer, forecast, Excel export | `tests/test_services_analytics.py` |
 | Voice | disclosure-first calls, consent-gated recording, country hours, metering, manual script | `tests/test_services_voice.py` |
 | Agents | orchestration graph with human interrupts, 12 audited tools, forbidden verbs refused | `tests/test_agents_graph.py` |
@@ -35,7 +41,8 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 13 pages across 12 routes, AR-RTL + EN, dark/light, every page wired to real endpoints, 24 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar, every page wired to real endpoints, 27 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox
 
@@ -45,8 +52,9 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Real adapters | SMTP, Meta WhatsApp Cloud API, Twilio, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented; only the deterministic fakes are exercised |
 | LLM providers | Anthropic / OpenAI-compatible network calls | Implemented with retries and metering; CI uses `FakeLLM` |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
-| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 24 component tests, not a real browser |
+| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 27 component tests, not a real browser |
 | WebSocket at scale | Redis pub/sub fan-out | The hub is in-process; multi-replica deployments need the fan-out documented in `docs/API.md` |
+| Real payment execution | Bank/PSP integration | Deliberately absent: the product records payments made outside it. `payment_suggestion.execution` is literally `outside_platform`, and there is no adapter seam to enable by accident |
 
 ## Not implemented (deliberate, documented, no fake screens)
 
@@ -78,5 +86,6 @@ syntax-validated, not executed.
 3. The WebSocket hub has no back-pressure: a slow client is dropped after the first failed send.
 4. Arabic PDF rendering of purchase orders uses the Latin font stack; Arabic strings render but not
    with the display face. Requires an embedded Arabic font subset.
-5. Frontend bundle: 346 kB (96 kB gzipped) for the shell plus a 407 kB (110 kB gzipped) charts chunk.
-   Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported.
+5. Frontend bundle: 394 kB (106 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
+   chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
+   the post-award screens ship in the main chunk.

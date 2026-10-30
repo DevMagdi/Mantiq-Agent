@@ -22,7 +22,6 @@ export type User = {
   must_change_password: boolean;
   mfa_enabled: boolean;
   locale: string;
-  theme: "dark" | "light";
   preferred_currency: string;
   phone: string;
   job_title: string;
@@ -320,6 +319,11 @@ export type Approval = {
   chain?: { step_no: number; role: string; status: string; decided_at?: string | null }[];
 };
 
+export type NotificationFeed = {
+  items: Notification[];
+  unread: number;
+};
+
 export type Notification = {
   id: string;
   kind: string;
@@ -487,4 +491,224 @@ export type PublicPortal = {
   requested: string;
   expires_at: string;
   message: string;
+};
+
+/* ------------------------------------------------------------------ post-PO lifecycle */
+
+export type PoStatus = "issued" | "in_transit" | "partially_received" | "received" | "confirmed" | "closed";
+
+export type PurchaseOrderLine = {
+  line_no: number;
+  description: string;
+  uom: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  rfq_line_id?: string | null;
+};
+
+export type PurchaseOrderSummary = {
+  id: string;
+  code: string;
+  rfq_id: string;
+  supplier_id: string;
+  supplier_name?: string;
+  supplier_name_ar?: string;
+  amount: string;
+  currency: string;
+  status: PoStatus;
+  status_label: string;
+  status_label_ar: string;
+  issued_at: string | null;
+  closed_at?: string | null;
+  erp_status: string;
+  lines: number;
+};
+
+export type ReceiptLine = {
+  line_no: number;
+  description: string;
+  uom: string;
+  ordered_qty: string;
+  received_qty: string;
+  accepted_qty: string;
+  rejected_qty?: string;
+  condition?: string;
+  note?: string;
+};
+
+export type GoodsReceipt = {
+  id: string;
+  code: string;
+  po_id: string;
+  status: "received" | "confirmed" | "rejected";
+  delivery_note_ref: string;
+  carrier: string;
+  warehouse: string;
+  lines: ReceiptLine[];
+  notes: string;
+  received_by: string | null;
+  received_at: string | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  confirmation_checks: Record<string, boolean>;
+  confirmation_comment: string;
+};
+
+export type MatchIssue = {
+  code: string;
+  line_no: number;
+  message: string;
+  message_ar: string;
+  detail?: string;
+};
+
+export type MatchLine = {
+  line_no: number;
+  description: string;
+  uom: string;
+  invoiced_qty: string;
+  unit_price: string;
+  line_total: string;
+  ordered_qty: string;
+  po_unit_price: string;
+  received_qty: string;
+  previously_invoiced_qty: string;
+  available_qty?: string;
+  price_variance_pct?: number;
+  status: "ok" | "mismatch";
+  issues: string[];
+};
+
+export type MatchResult = {
+  status: "matched" | "mismatch" | "incomplete";
+  issues: MatchIssue[];
+  lines: MatchLine[];
+  tolerance_pct: string;
+  totals: { po_amount: string; invoiced_amount: string; received_value: string; currency: string };
+  receipts_confirmed: boolean;
+  can_approve: boolean;
+  over_invoiced: boolean;
+  checked_at: string;
+};
+
+export type PaymentReason = { code: string; text_en: string; text_ar: string };
+
+export type PaymentSuggestion = {
+  method: string;
+  method_label_en: string;
+  method_label_ar: string;
+  terms: string;
+  currency: string;
+  amount_due: string;
+  total: string;
+  paid_amount: string;
+  due_date: string | null;
+  days_until_due: number | null;
+  priority: "high" | "normal" | "low";
+  cross_border: boolean;
+  requires_fx: boolean;
+  requires_human_approval: boolean;
+  execution: "outside_platform";
+  reasons: PaymentReason[];
+};
+
+export type SupplierInvoice = {
+  id: string;
+  number: string;
+  po_id: string;
+  supplier_id: string;
+  status: "received" | "matched" | "mismatched" | "approved" | "partially_paid" | "paid" | "disputed";
+  currency: string;
+  subtotal: string;
+  tax_amount: string;
+  total: string;
+  paid_amount: string;
+  outstanding: string;
+  invoice_date: string | null;
+  due_date: string | null;
+  lines: { line_no: number; description: string; uom: string; quantity: string; unit_price: string; line_total: string }[];
+  match_result: Partial<MatchResult>;
+  payment_suggestion: Partial<PaymentSuggestion>;
+  approved_by: string | null;
+  approved_at: string | null;
+  notes: string;
+};
+
+export type LedgerEntry = {
+  id: string;
+  kind: "invoice" | "payment" | "credit_note" | "adjustment";
+  amount: string;
+  currency: string;
+  entry_date: string;
+  method: string;
+  reference: string;
+  invoice_id: string | null;
+  po_id: string | null;
+  note: string;
+};
+
+export type SupplierBalance = {
+  supplier_id: string;
+  invoiced_total: string;
+  paid_total: string;
+  outstanding: string;
+  overdue: string;
+  open_invoices: number;
+  currency: string;
+  last_payment_at: string | null;
+  entries: LedgerEntry[];
+  supplier_name?: string;
+  supplier_name_ar?: string;
+};
+
+export type SupplierBalanceRow = {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  status: string;
+  balance: string;
+  outstanding: string;
+  overdue: string;
+  open_invoices: number;
+  currency: string;
+  last_payment_at: string | null;
+};
+
+export type PurchaseOrderDetail = Omit<PurchaseOrderSummary, "lines"> & {
+  lines: PurchaseOrderLine[];
+  supplier: { id: string; name: string; name_ar: string; status: string } | null;
+  rfq: { id: string; code: string; title: string; payment_terms: string; incoterm: string } | null;
+  document_html: string;
+  timeline: {
+    kind: string;
+    at: string | null;
+    actor: string | null;
+    label_en: string;
+    label_ar: string;
+    status: string;
+    done: boolean;
+    ref?: string;
+  }[];
+  receipts: GoodsReceipt[];
+  invoices: SupplierInvoice[];
+  discrepancy: {
+    lines: {
+      line_no: number;
+      description: string;
+      uom: string;
+      ordered_qty: string;
+      received_qty: string;
+      confirmed_qty: string;
+      outstanding_qty: string;
+      status: string;
+    }[];
+    ordered_total: string;
+    received_total: string;
+    outstanding_lines: number;
+    short_delivery: boolean;
+  };
+  supplier_balance: SupplierBalance;
+  next_status: PoStatus | null;
+  can_close: boolean;
 };

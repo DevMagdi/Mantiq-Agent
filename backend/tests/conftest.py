@@ -20,6 +20,10 @@ os.environ.update({
     "BOOTSTRAP_ON_START": "false",
     "RATE_LIMIT_ENABLED": "false",
     "PUBLIC_BASE_URL": "http://testserver",
+    # The suite must not depend on when it runs: the contact-hours rule has its own
+    # explicit-clock tests (tests/test_policy_engine.py, tests/test_services_negotiation.py).
+    "CONTACT_HOURS_START": "0",
+    "CONTACT_HOURS_END": "23",
 })
 
 import httpx  # noqa: E402
@@ -110,6 +114,13 @@ async def requester(client) -> dict:
 @pytest_asyncio.fixture
 async def finance(client) -> dict:
     data = await _login(client, "finance@nile.example.com")
+    return {"token": data["access_token"], "user": data["user"],
+            "headers": {"authorization": f"Bearer {data['access_token']}"}}
+
+
+@pytest_asyncio.fixture
+async def warehouse(client) -> dict:
+    data = await _login(client, "storekeeper@nile.example.com")
     return {"token": data["access_token"], "user": data["user"],
             "headers": {"authorization": f"Bearer {data['access_token']}"}}
 

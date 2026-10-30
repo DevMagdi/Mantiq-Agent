@@ -131,13 +131,11 @@ class PreferencesIn(BaseModel):
     job_title: str | None = None
     phone: str | None = None
     locale: str | None = Field(None, pattern="^(ar|en)$")
-    theme: str | None = Field(None, pattern="^(dark|light|system)$")
-    numerals: str | None = Field(None, pattern="^(western|arabic_indian)$")
     preferred_currency: str | None = Field(None, min_length=3, max_length=3)
     notification_prefs: dict | None = None
 
 
-@router.patch("/auth/me", summary="Update profile and preferences (theme, locale, numerals)")
+@router.patch("/auth/me", summary="Update profile and preferences (locale, currency, contacts)")
 async def update_me(payload: PreferencesIn, ctx: Context = Depends(current_context)):
     changes = payload.model_dump(exclude_none=True)
     for key, value in changes.items():

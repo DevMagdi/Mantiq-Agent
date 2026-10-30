@@ -144,7 +144,7 @@ export default function SuppliersPage() {
           </button>
         </div>
 
-        {error ? <p role="alert" className="mt-2 text-sm text-[color:var(--danger)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-2 text-sm text-[color:var(--danger-ink)]">{error}</p> : null}
         {discovery ? (
           <div className="mt-3 rounded-md border border-line">
             <div className="flex items-center justify-between border-b border-line px-3 py-2 text-xs text-ink-muted">
@@ -252,7 +252,7 @@ export default function SuppliersPage() {
             {(selected.flags ?? []).length > 0 ? (
               <section>
                 <p className="label">{t("suppliers.flags")}</p>
-                <ul className="space-y-1 text-2xs text-[color:var(--warn)]">
+                <ul className="space-y-1 text-2xs text-[color:var(--warn-ink)]">
                   {selected.flags?.map((flag) => (
                     <li key={`${flag.type}-${flag.at}`}>{flag.type}: {flag.reason}</li>
                   ))}

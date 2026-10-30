@@ -12,7 +12,7 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (457 backend tests, 24 frontend tests) and coverage (84% line coverage of
+Test counts (513 backend tests, 27 frontend tests) and coverage (85% line coverage of
 `backend/app`) are reproduced in `docs/PR_DESCRIPTION.md`.
 
 ## Functional requirements
@@ -41,6 +41,11 @@ Test counts (457 backend tests, 24 frontend tests) and coverage (84% line covera
 | FR-NEG-2 | Outbound message guardrails and confidentiality | `app/agents/guardrails.py` | `tests/test_injection_corpus.py` (86), `tests/test_services_negotiation.py` | Done |
 | FR-NEG-4 | No autonomous accept/sign/pay; human approval mandatory | `app/agents/policy_engine.py`, `app/agents/tools.py` | `tests/test_policy_engine.py` (17), `tests/test_agents_graph.py` (11) | Done |
 | FR-NEG-5 | Negotiation policy versioning, rounds, concessions | `app/services/negotiation.py` | `tests/test_services_negotiation.py` (11), `tests/test_negotiation_guardrails.py` (122) | Done |
+| FR-PO-2 | Goods receipt at the warehouse with per-line received / accepted / rejected quantities | `app/services/receiving.py::create_receipt`, `POST /purchase-orders/{id}/receipts` | `tests/test_services_receiving.py` (17), `tests/test_api_post_po.py` | Done |
+| FR-PO-3 | Requester confirms the delivery matches the original need before the PO can close | `app/services/receiving.py::confirm_receipt`, `POST /receipts/{id}/confirm`, RBAC `receipt:confirm` | `tests/test_services_receiving.py`, `tests/test_api_post_po.py` (separation of duties) | Done |
+| FR-PO-4 | Three-way match PO ↔ confirmed receipt ↔ invoice, with partial receipts and partial invoicing | `app/services/invoicing.py::compute_match`, `POST /invoices/{id}/match` | `tests/test_services_invoicing.py` (20), `tests/test_api_post_po.py` | Done |
+| FR-PO-5 | Deterministic payment-method suggestion after approval; no payment execution anywhere | `app/services/invoicing.py::suggest_payment`, `POST /invoices/{id}/approve` | `tests/test_services_invoicing.py`, `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool` | Done |
+| FR-PO-6 | Supplier ledger and outstanding / overdue balance per supplier | `app/services/invoicing.py::record_payment`, `supplier_balance(s)`, `GET /supplier-balances` | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` | Done |
 | FR-RPT-1 | Savings, cycle time, forecast, Excel export | `app/services/analytics.py` | `tests/test_services_analytics.py` (9) | Done |
 | FR-BIL-2 | Usage metering, plans, invoices | `app/services/billing_helpers.py`, `POST /billing/invoice` | `tests/test_services_award_discovery.py`, `tests/test_api_admin.py` | Done |
 | FR-ADM-3 | LLM provider configuration per tenant | `app/agents/llm/__init__.py`, `PUT /llm-config` | `tests/test_api_admin.py`, `tests/test_adapters.py` | Done |
@@ -66,7 +71,7 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 | NFR-PERF-1 | Indexes for list, board, audit and full-text paths | migration `0011_indexes_search_vectors` | `alembic check` clean; `tests/test_api_admin.py` pagination | Partial — pgvector path not exercised without Postgres |
 | NFR-PERF-2 | Reply parsing bounded (20k chars, no unbounded LLM context) | `app/services/extraction.py` | `tests/test_services_extraction.py` | Done |
 | NFR-PRV-1 | Data-subject rights with statutory deadlines | `app/services/privacy.py`, `data_erasure_request.due_at` | `tests/test_services_privacy_portal.py` | Done |
-| NFR-UX-1 | Arabic RTL default, English toggle, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, logical properties | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (24 tests) | Partial — automated axe pass not wired into CI |
+| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (27 tests), measured contrast pairs in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI |
 | NFR-OPS-1 | Health/readiness/observability | `app/main.py` `/health` `/ready` `/metrics` | `tests/test_api_flow.py` | Done |
 
 ## Acceptance criteria (spot-checked)
@@ -78,6 +83,9 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 | AC-CMP-1 | The comparison is blocked while any offer is unverified or low-confidence | `tests/test_services_award_discovery.py` (`blocked_for_low_confidence`) |
 | AC-PO-1 | No purchase order exists before the final approval step | `tests/test_services_approval_auth.py::test_chain_advances_step_by_step_…` |
 | AC-PRV-1 | An erasure request redacts PII but keeps the commercial record | `tests/test_services_privacy_portal.py::test_privacy_export_and_erasure_…` |
+| AC-PO-2 | A purchase order cannot close before the requesting team confirms the delivery | `tests/test_services_receiving.py` (close requires `confirmed`) |
+| AC-PO-3 | An invoice whose quantity exceeds the confirmed receipt, or whose price exceeds tolerance, is flagged and cannot be approved without a recorded override reason | `tests/test_services_invoicing.py`, `tests/test_api_post_po.py` |
+| AC-PO-4 | No agent tool can approve an invoice, confirm a receipt or move money | `tests/test_agents_graph.py::test_post_award_human_actions_have_no_agent_tool` |
 
 ## What is not covered here
 
@@ -86,4 +94,4 @@ by `tests/test_api_flow.py` and `tests/test_api_rfq_surface.py`.
 2. Real third-party clients (Anthropic/OpenAI, Twilio, Meta Cloud API, Paymob, ERP HTTP endpoints)
    are implemented but not exercised: tests use their deterministic fakes.
 3. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
-   production build, TypeScript strict typecheck, ESLint, and 24 component/interaction tests.
+   production build, TypeScript strict typecheck, ESLint, and 27 component/interaction tests.

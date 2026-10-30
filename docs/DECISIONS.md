@@ -89,3 +89,55 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
 30. **Coverage is measured with `concurrency = greenlet,thread`.** SQLAlchemy's async engine runs the
     sync ORM inside greenlets; without this the tracer loses every line after an endpoint's first
     `await` and under-reports API coverage by ~35 points. The setting lives in `pyproject.toml`.
+
+## Post-PO lifecycle (delivery → match → settlement)
+
+31. **One status axis per object, one owner per transition.** The purchase order moves
+    `issued → in_transit → partially_received → received → confirmed → closed`; `received` is the
+    warehouse's fact, `confirmed` is the requester's judgement. `close_po` refuses anything that is
+    not `confirmed`, so a delivery can never be closed by the team that booked it.
+32. **Separation of duties is enforced by permissions, not by convention.** `receipt:create`
+    (warehouse) and `receipt:confirm` (requester/procurement/finance) are separate grants; the demo
+    `warehouse` role has the first and not the second. The receipt drawer is hidden and the endpoint
+    returns 403 with `required_permission` if a storekeeper tries to sign off.
+33. **The three-way match never trusts the invoice.** Quantities are capped by the *confirmed*
+    receipt (not by what the warehouse typed), prices are compared with the PO line inside a 0.5%
+    tolerance, and previously invoiced quantities are subtracted so partial invoicing cannot
+    double-bill. Over-invoicing is a hard `QTY_EXCEEDS_RECEIPT`; the tolerance is per line, not per
+    total, because a cheap line cannot mask an expensive one.
+34. **A mismatch is approvable only with a written reason.** `approve_invoice` refuses a non-matching
+    invoice unless `override_reason` is supplied; the text is appended to the invoice notes and the
+    approval audit row records `overridden: true`. Silence is never consent.
+35. **Payments are recorded, never executed.** `record_payment` writes a ledger credit with a
+    mandatory external reference against an already-approved invoice and rejects overpayment. There
+    is no bank/payment adapter in the codebase, and the payment suggestion carries
+    `execution: "outside_platform"` so no client can mistake it for a transfer.
+36. **The supplier balance is derived, not stored.** It is the sum of the ledger (invoices debit,
+    payments credit) computed per request, so it can never drift from the documents that created it.
+    `overdue` is a filtered view of the same rows rather than a second counter.
+37. **The post-award loop is outside the agent graph.** `STAGES` still ends at `approval`; receiving,
+    matching, approving and paying are RBAC-guarded service calls made by named humans. A test fails
+    the build if a payment/receipt tool is ever registered.
+
+## Frontend theme
+
+38. **There is exactly one theme: navy.** The light theme, `[data-theme]` blocks, the `darkMode`
+    Tailwind switch, `User.theme`, the `PATCH /auth/me` preference and the toggle in the shell were
+    deleted (migration `0014_drop_theme_preference` drops the columns). Two palettes meant every
+    screen, PDF and screenshot had to be reviewed twice; the institutional navy is the brand.
+39. **Semantic colours are split into fill and ink.** `--ok/--warn/--danger/--info` are 2.4–4.3:1 as
+    text on the card surface, so they are fills/borders/chart marks only; text uses
+    `--ok-ink/--warn-ink/--danger-ink/--info-ink`, the same hues lightened past WCAG AA (5.7–8.2:1).
+40. **The rail collapses and remembers.** `localStorage["procureai.sidebar"]` holds the state (a UI
+    preference, not a tenant setting); collapsed keeps 40px targets and `aria-label`s, a hairline per
+    group and the gold active rail drawn with a logical `start-0` pseudo-element so RTL mirrors for
+    free.
+
+## Test determinism
+
+41. **The suite never reads the wall clock for contact hours.** `CONTACT_HOURS_START/END` are tenant
+    settings (default 07:00–21:00, the real business rule) and `tests/conftest.py` widens them to
+    00:00–23:59 for the session. Before this, `tests/test_api_flow.py` passed in the morning and
+    failed after 21:00 Cairo because dispatch was legitimately blocked. The hours rule itself is
+    still asserted with an explicit `now` in `tests/test_policy_engine.py` and
+    `tests/test_services_negotiation.py`.
