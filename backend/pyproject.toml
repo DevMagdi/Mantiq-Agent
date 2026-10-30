@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "procureai-backend"
 version = "1.0.0"
@@ -6,11 +10,11 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
-  "sqlalchemy>=2.0",
+  "sqlalchemy[asyncio]>=2.0",
   "asyncpg>=0.29",
   "aiosqlite>=0.20",
   "alembic>=1.13",
-  "pydantic>=2.8",
+  "pydantic[email]>=2.8",
   "pydantic-settings>=2.4",
   "pyjwt>=2.9",
   "argon2-cffi>=23.1",
@@ -20,6 +24,9 @@ dependencies = [
   "python-multipart>=0.0.9",
   "celery>=5.4,<6",
   "redis>=5,<6",
+  "typer>=0.12",
+  "cryptography>=42",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +34,12 @@ dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "ruff>=0.5"]
 
 [project.scripts]
 procureai = "app.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.agents.prompts" = ["*.md", "*.txt"]
 
 [tool.ruff]
 line-length = 110
