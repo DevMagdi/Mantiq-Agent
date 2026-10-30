@@ -12,9 +12,10 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
    clean; ORM models and migrations are edited together (a mismatch fails CI).
 3. **Celery tasks are thin wrappers over service functions.** Schedulers must never hold business
    logic; every rule stays testable without a broker. When Redis is absent the API still works and
-   the periodic jobs are invoked by CLI (`cli reminders`, `cli purge`).
+   jobs can be triggered by hand (`procureai purge`, `procureai fx-refresh`) or by awaiting the task
+   functions directly, which is how the test suite runs them.
 4. **Adapters always ship with a fake.** `registry.resolve(...)` returns the real client only when
-   its credentials exist, otherwise the deterministic fake. This is what makes a 457-test suite
+   its credentials exist, otherwise the deterministic fake. This is what makes a 464-test suite
    hermetic and what lets a demo run with zero external accounts.
 5. **No MinIO in dev.** `LocalStorage` implements the same `StorageAdapter` protocol under
    `backend/var/storage`; compose wires MinIO for production.
