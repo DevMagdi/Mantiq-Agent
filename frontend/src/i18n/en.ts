@@ -109,6 +109,13 @@ const en: typeof ar = {
     viewAll: "View all",
   },
   requests: {
+    clarificationWaived: "Question waived; you can submit now",
+    submitted: "Request submitted — ready for an RFQ",
+    openQuestions: "{{count}} open question(s)",
+    allResolved: "All questions resolved",
+    waive: "Waive",
+    waiveHint: "Waive this question if the need is already clear enough to quote.",
+    submitBlocked: "Resolve or waive the {{count}} open question(s) to submit this request.",
     title: "Purchase requests",
     subtitle: "From a plain-language need to a qualified RFQ",
     newRequest: "New request",
@@ -440,6 +447,15 @@ const en: typeof ar = {
       closed: "Purchase order closed",
     },
   },
+  access: {
+    deniedTitle: "You do not have access to this screen",
+    deniedBody: "Your role does not include this permission. Ask an administrator if you need it.",
+    backHome: "Back to the dashboard",
+    cardBody: "Hidden for your role so the page does not make a request that would be refused.",
+    auditTitle: "Agent activity",
+    approvalsTitle: "Approvals",
+  },
+
 };
 
 export default en;

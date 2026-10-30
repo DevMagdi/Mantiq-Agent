@@ -6,6 +6,8 @@ import { Link } from "react-router-dom";
 import { PageHeading } from "@/components/Shell";
 import { Card, EmptyState, ErrorState, LoadingBlock, Spinner, StatusChip, useToast } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import { date, money, relative } from "@/lib/format";
 import type { AppLang } from "@/i18n";
 import type { Approval, Page } from "@/lib/types";
@@ -20,9 +22,11 @@ export default function ApprovalsPage() {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
+  const { can } = useAuth();
   const list = useQuery({
     queryKey: ["approvals"],
     queryFn: () => api.get<Page<Approval>>("/api/v1/approvals?page_size=100"),
+    enabled: can(PERM.approvalRead),
   });
 
   const decide = useMutation({

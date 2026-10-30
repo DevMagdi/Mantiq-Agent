@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 import { PageHeading } from "@/components/Shell";
 import { Badge, Card, CardHeader, EmptyState, ErrorState, LoadingBlock, Progress, Spinner, StatusChip, TabList, TabPanel, Tabs, useToast } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { NoAccess } from "@/components/Guard";
+import { useAuth } from "@/lib/session";
+import { PERM } from "@/lib/permissions";
 import { date, money, num } from "@/lib/format";
 import type { AppLang } from "@/i18n";
 import type { ApiKey, Integration, IntegrationsPayload, Page, Usage } from "@/lib/types";
@@ -32,29 +35,38 @@ const RETENTION_ENTITIES = ["procurement_records", "audit_logs", "supplier_pii",
 
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState("integrations");
   const { i18n } = useTranslation();
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
+  const { can } = useAuth();
+
+  // Each tab maps to the permission its endpoint requires, so a signed-in role only ever sees
+  // (and only ever calls) the sections it can actually read.
+  const tabs = [
+    { value: "integrations", label: t("settings.integrations"), permission: PERM.adminIntegrations },
+    { value: "apiKeys", label: t("settings.apiKeys"), permission: PERM.adminApiKeys },
+    { value: "llm", label: t("settings.llm"), permission: PERM.adminLlm },
+    { value: "billing", label: t("settings.billing"), permission: PERM.adminBilling },
+    { value: "retention", label: t("settings.retention"), permission: PERM.settingsRead },
+  ].filter((item) => can(item.permission));
+
+  const [tab, setTab] = useState(tabs[0]?.value ?? "");
+  const active = tabs.some((item) => item.value === tab) ? tab : tabs[0]?.value ?? "";
 
   return (
     <div className="space-y-4">
       <PageHeading title={t("settings.title")} subtitle={t("settings.subtitle")} />
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabList
-          items={[
-            { value: "integrations", label: t("settings.integrations") },
-            { value: "apiKeys", label: t("settings.apiKeys") },
-            { value: "llm", label: t("settings.llm") },
-            { value: "billing", label: t("settings.billing") },
-            { value: "retention", label: t("settings.retention") },
-          ]}
-        />
-        <TabPanel value="integrations"><Integrations lang={lang} /></TabPanel>
-        <TabPanel value="apiKeys"><ApiKeys lang={lang} /></TabPanel>
-        <TabPanel value="llm"><LlmSettings lang={lang} /></TabPanel>
-        <TabPanel value="billing"><Billing lang={lang} /></TabPanel>
-        <TabPanel value="retention"><Retention /></TabPanel>
-      </Tabs>
+      {tabs.length === 0 ? (
+        <NoAccess permission={PERM.adminIntegrations} />
+      ) : (
+        <Tabs value={active} onValueChange={setTab}>
+          <TabList items={tabs.map(({ value, label }) => ({ value, label }))} />
+          {can(PERM.adminIntegrations) ? <TabPanel value="integrations"><Integrations lang={lang} /></TabPanel> : null}
+          {can(PERM.adminApiKeys) ? <TabPanel value="apiKeys"><ApiKeys lang={lang} /></TabPanel> : null}
+          {can(PERM.adminLlm) ? <TabPanel value="llm"><LlmSettings lang={lang} /></TabPanel> : null}
+          {can(PERM.adminBilling) ? <TabPanel value="billing"><Billing lang={lang} /></TabPanel> : null}
+          {can(PERM.settingsRead) ? <TabPanel value="retention"><Retention /></TabPanel> : null}
+        </Tabs>
+      )}
     </div>
   );
 }
@@ -67,8 +79,13 @@ function Integrations({ lang }: { lang: AppLang }) {
   const [form, setForm] = useState({ kind: "email", name: "", config: "{}" });
   const [saving, setSaving] = useState(false);
 
+  const { can } = useAuth();
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: () => api.get<Capabilities>("/api/v1/meta/capabilities") });
-  const integrations = useQuery({ queryKey: ["integrations"], queryFn: () => api.get<IntegrationsPayload>("/api/v1/integrations") });
+  const integrations = useQuery({
+    queryKey: ["integrations"],
+    queryFn: () => api.get<IntegrationsPayload>("/api/v1/integrations"),
+    enabled: can(PERM.adminIntegrations),
+  });
 
   const test = async (kind: string) => {
     setTesting(kind);
@@ -216,7 +233,12 @@ function ApiKeys({ lang }: { lang: AppLang }) {
   const [created, setCreated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const keys = useQuery({ queryKey: ["api-keys"], queryFn: () => api.get<Page<ApiKey>>("/api/v1/api-keys") });
+  const { can } = useAuth();
+  const keys = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => api.get<Page<ApiKey>>("/api/v1/api-keys"),
+    enabled: can(PERM.adminApiKeys),
+  });
 
   const create = async () => {
     setBusy(true);
@@ -331,7 +353,12 @@ function LlmSettings({ lang }: { lang: AppLang }) {
   const { t } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const config = useQuery({ queryKey: ["llm-config"], queryFn: () => api.get<LlmConfigPayload>("/api/v1/llm-config") });
+  const { can } = useAuth();
+  const config = useQuery({
+    queryKey: ["llm-config"],
+    queryFn: () => api.get<LlmConfigPayload>("/api/v1/llm-config"),
+    enabled: can(PERM.adminLlm),
+  });
   const [form, setForm] = useState({ provider: "fake", model: "", base_url: "", api_key: "", is_self_hosted: false, monthly_token_budget: 5_000_000 });
   const [busy, setBusy] = useState(false);
 
@@ -449,8 +476,17 @@ function Billing({ lang }: { lang: AppLang }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const usage = useQuery({ queryKey: ["billing-usage"], queryFn: () => api.get<Usage>("/api/v1/billing/usage") });
-  const invoices = useQuery({ queryKey: ["invoices"], queryFn: () => api.get<Page<Invoice>>("/api/v1/billing/invoices") });
+  const { can } = useAuth();
+  const usage = useQuery({
+    queryKey: ["billing-usage"],
+    queryFn: () => api.get<Usage>("/api/v1/billing/usage"),
+    enabled: can(PERM.adminBilling),
+  });
+  const invoices = useQuery({
+    queryKey: ["invoices"],
+    queryFn: () => api.get<Page<Invoice>>("/api/v1/billing/invoices"),
+    enabled: can(PERM.adminBilling),
+  });
   const [busy, setBusy] = useState(false);
 
   const generate = async () => {
