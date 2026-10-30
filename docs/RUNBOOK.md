@@ -15,6 +15,48 @@ Everything an operator needs to install, seed, upgrade, monitor, and recover Pro
 SQLite works for a laptop or CI (`DATABASE_URL=sqlite+aiosqlite:///./procureai.db`); PostgreSQL is
 required for RLS, `pg_trgm` search and pgvector similarity.
 
+## 2a. Local development on PostgreSQL 16 (required)
+
+SQLite is a sandbox fallback, not a development database: tenant RLS, `pg_trgm` and pgvector simply
+do not exist there. Docker is the shortest path:
+
+```bash
+docker run -d --name procureai-db -p 5432:5432 \
+  -e POSTGRES_USER=procureai -e POSTGRES_PASSWORD=change-me -e POSTGRES_DB=procureai \
+  pgvector/pgvector:pg16          # postgres 16 + pgvector + contrib (citext, pg_trgm, pgcrypto)
+
+cd backend
+export DATABASE_URL="postgresql+asyncpg://procureai:change-me@localhost:5432/procureai"
+export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+alembic upgrade head               # 0001 → 0014: extensions, 60 RLS policies, trgm + HNSW indexes
+alembic check                      # must print "No new upgrade operations detected."
+python -m app.cli doctor           # connectivity, extensions, migration head, adapter status
+uvicorn app.main:app --reload      # seeds reference data + the demo dataset on first boot
+```
+
+Without Docker, any PostgreSQL 16 server works, provided the `vector`, `citext`, `pg_trgm` and
+`pgcrypto` extensions are installable — on Debian/Ubuntu that is
+`apt install postgresql-16 postgresql-contrib-16` plus `pgvector` from your distribution or source.
+Then create the role/database and run the same `alembic upgrade head`.
+
+Verify the guarantees the application relies on:
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://procureai:change-me@localhost:5432/procureai"
+python ../scripts/verify_rls.py    # 6/6: own rows, foreign rows 0, WITH CHECK, append-only audit
+```
+
+If a machine genuinely has no PostgreSQL (an offline sandbox), opt into the degraded mode explicitly
+and accept that these guarantees are off:
+
+```bash
+export APP_ENV=dev ALLOW_SQLITE_FALLBACK=true
+export DATABASE_URL="sqlite+aiosqlite:///./procureai.db"
+```
+
+Without that flag the API refuses to start with an explanation naming the variable — this is
+deliberate (`docs/DECISIONS.md` §42).
+
 ## 2. First install (5 minutes)
 
 ```bash

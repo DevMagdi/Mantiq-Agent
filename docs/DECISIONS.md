@@ -141,3 +141,46 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     failed after 21:00 Cairo because dispatch was legitimately blocked. The hours rule itself is
     still asserted with an explicit `now` in `tests/test_policy_engine.py` and
     `tests/test_services_negotiation.py`.
+
+## Database policy
+
+42. **PostgreSQL 16 is the only supported database; SQLite is an isolated test/sandbox fallback.**
+    `database_url` now defaults to `postgresql+asyncpg://procureai:change-me@localhost:5432/procureai`.
+    SQLite starts only when `APP_ENV=test` or `ALLOW_SQLITE_FALLBACK=true`; otherwise startup raises
+    with the remedy inline. The reason is not taste: `tenant_id` RLS, `pg_trgm` ranking, pgvector
+    similarity and `citext` simply do not exist on SQLite, so a "supported" SQLite deployment would
+    silently lose tenant isolation. The API is still SQLAlchemy 2 async on both engines.
+43. **The PostgreSQL settings are production settings, not defaults of convenience.** Pool
+    `10 + 20 overflow`, recycle every 1800 s, and `statement_timeout=15000` applied per connection via
+    `server_settings` (SQLite fallback gets `busy_timeout` + `synchronous=NORMAL` instead). The
+    timeout is deliberate: a runaway analytics query must fail inside the request budget rather than
+    pinning a pool slot.
+44. **`metadata.create_all` can no longer paper over a failed migration outside dev.** The Alembic
+    fallback runs only for `APP_ENV != prod` **and** only on the SQLite fallback; on PostgreSQL a
+    failed `alembic upgrade` aborts startup, because `create_all` cannot create the RLS policies,
+    extensions or triggers and would leave a database that looks healthy but is not protected.
+45. **RLS policies compare `tenant_id` as text.** `0010` originally cast the GUC to `uuid`
+    (`current_setting('app.tenant_id')::uuid`), which fails on every table because `tenant_id` is
+    `varchar(36)`: the whole migration chain died at the first policy on real PostgreSQL. Policies now
+    use `NULLIF(current_setting('app.tenant_id', true), '')`, verified by `scripts/verify_rls.py`
+    (own rows visible, other tenant's rows 0, cross-tenant move blocked by `WITH CHECK`, append-only
+    audit log).
+46. **Revision ids are capped at 32 characters.** Alembic hard-codes `alembic_version.version_num`
+    as `varchar(32)` and PostgreSQL enforces it — `0012_bootstrap_seed_reference_data` (33) aborted the
+    chain on PostgreSQL while passing on SQLite. The revision was renamed and `migrations/env.py` now
+    asserts the limit at import, so the failure moves from deploy time to lint time.
+47. **Raw-SQL search objects are excluded from autogenerate.** `embedding_vec vector(1536)` and the
+    `pg_trgm`/HNSW indexes exist only in migration `0011` (SQLAlchemy cannot express them, and SQLite
+    `create_all` would choke), so `alembic check` would propose dropping them forever. `include_object`
+    filters exactly those six indexes and one column by name.
+
+## Verification
+
+48. **GitHub Actions now runs a real PostgreSQL 16 job.** The `postgres` job migrates from scratch on
+    `pgvector/pgvector:pg16`, runs `alembic check`, asserts SQLite is refused outside test/sandbox and
+    runs `scripts/verify_rls.py`. Previously every CI run was SQLite-only, which is exactly how the
+    two PostgreSQL-only defects above survived.
+49. **The load test is a script in the repo, not a claim in a document.**
+    `scripts/load_test.py --users 50` drives 50 independent sessions with per-role endpoint mixes,
+    think time and live WebSockets, and fails on p95 > 800 ms, p99 > 2000 ms, any 5xx or any 403.
+    Results and caveats are in `docs/LOAD_TEST.md`.

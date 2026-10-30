@@ -6,9 +6,12 @@ implemented, what is proven by a test, and what genuinely does not exist yet.
 Verification commands used for this snapshot (real output in `docs/PR_DESCRIPTION.md`):
 
 ```bash
-cd backend && pytest tests -q --cov=app        # 513 tests, 0 failures, 85% coverage
+cd backend && pytest tests -q --cov=app        # 520 tests, 0 failures, 85% coverage
 cd backend && ruff check app tests             # clean
-cd backend && alembic upgrade head && alembic check
+export DATABASE_URL=postgresql+asyncpg://procureai:change-me@localhost:5432/procureai
+cd backend && alembic upgrade head && alembic check     # on PostgreSQL 16, not SQLite
+python scripts/verify_rls.py                   # 6/6 isolation guarantees
+python scripts/load_test.py --users 50 --duration 60    # PASS, see docs/LOAD_TEST.md
 cd frontend && npm run typecheck && npm run lint && npm run test && npm run build
 ```
 
@@ -41,14 +44,18 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar, every page wired to real endpoints, 27 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar, every page wired to real endpoints, 34 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403 | `frontend/src/components/guard.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
+| Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
+| PostgreSQL verification | Migration chain `0001→0014`, `alembic check`, 60 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6/6), CI job `postgres` |
+| Load | 50 concurrent role-based sessions (reads + WebSockets): 41.3 req/s, p95 82 ms, 0 errors | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox
 
 | Item | What is missing | Consequence |
 | --- | --- | --- |
-| PostgreSQL-only hardening | RLS enforcement, `pg_trgm` search ranking, pgvector similarity | Code paths are dialect-guarded and enabled in production; CI runs SQLite, so they are not exercised here |
+| pgvector similarity ranking | The `embedding_vec vector(1536)` columns and HNSW indexes are created by migration `0011` (verified on real PostgreSQL 16), but no service computes embeddings yet | Ranking falls back to the trigram/keyword path; the columns are ready for an embedding provider |
 | Real adapters | SMTP, Meta WhatsApp Cloud API, Twilio, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented; only the deterministic fakes are exercised |
 | LLM providers | Anthropic / OpenAI-compatible network calls | Implemented with retries and metering; CI uses `FakeLLM` |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
@@ -69,11 +76,11 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 ## Infrastructure verified in CI
 
 All three images build (`docker build` in the container job), `helm lint` and `helm template` pass,
-`pip install -e ".[dev]"` works from an empty virtualenv, `alembic upgrade head` + `alembic check`
-are clean, and the whole test suite runs on GitHub-hosted runners (Actions run `41098250455`).
-The compose file itself is only YAML-validated locally — no Docker daemon ran it.
-What cannot be verified here is a live PostgreSQL/Redis/MinIO deployment — the compose stack is
-syntax-validated, not executed.
+`pip install -e ".[dev]"` works from an empty virtualenv, and the whole test suite runs on
+GitHub-hosted runners (Actions run `41098250455`). A dedicated CI job now migrates a real
+PostgreSQL 16 (`pgvector/pgvector:pg16`) from scratch, runs `alembic check` and proves RLS isolation.
+The compose file itself is only YAML-validated locally — no Docker daemon ran it. Redis, MinIO and
+the Celery workers are not executed here; their code paths run eagerly in the test suite.
 
 ## Known rough edges
 
@@ -86,6 +93,9 @@ syntax-validated, not executed.
 3. The WebSocket hub has no back-pressure: a slow client is dropped after the first failed send.
 4. Arabic PDF rendering of purchase orders uses the Latin font stack; Arabic strings render but not
    with the display face. Requires an embedded Arabic font subset.
-5. Frontend bundle: 394 kB (106 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
+5. Frontend bundle: 400 kB (108 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
    chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
    the post-award screens ship in the main chunk.
+6. The load test measures one uvicorn worker against one PostgreSQL instance; it does not prove
+   horizontal scaling, and the WebSocket hub still needs the Redis fan-out before running more than
+   one API replica (`docs/API.md`).

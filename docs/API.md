@@ -309,9 +309,24 @@ The table below is generated from the live OpenAPI schema of the running applica
 | `offer.extracted` | `{rfq_id, supplier_id, extractions, offers}` | `app/services/extraction.py` |
 | `notification.created` | `{kind, title, link, severity}` | `app/services/common.py` |
 
-The hub is in-process (one room per tenant). Behind multiple API replicas, run a single WS-serving
-deployment or add a Redis pub/sub fan-out — that is the documented scale-out point. Clients send a
-`ping` text frame every 25s and reconnect with backoff on close code `4401` (expired token).
+Every frame is JSON with a `type` field; `event` is kept alongside it so older subscribers keep
+working. The upgrade is accepted **before** the token is validated, so a bad token produces a real
+close code instead of an opaque handshake failure:
+
+| Close code | Reason | Client behaviour |
+| --- | --- | --- |
+| `4401` | `invalid_token` | stop and wait for a new session (do not retry in a loop) |
+| `4403` | `no_tenant` | stop; the token is not tenant-scoped |
+| `1000` | normal close (tab closed, logout) | reconnect on next mount |
+
+Clients send a bare `ping` text frame every 25 s (a JSON `{"type":"ping"}` frame is also accepted)
+and treat a missing `pong` as a dead socket. The SPA reconnects with capped exponential backoff
+(1/2/4/8/15/30 s) plus jitter, and immediately when the tab becomes visible again — the socket is a
+convenience on top of the polling queries, never a dependency.
+
+The hub is in-process (one room per tenant, `GET /metrics`-friendly `hub.connection_count()`).
+Behind multiple API replicas run a single WS-serving deployment or add a Redis pub/sub fan-out —
+that is the documented scale-out point. `scripts/load_test.py` exercises 42 concurrent sockets.
 
 ## Pagination, filtering and sorting
 
