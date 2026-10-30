@@ -44,8 +44,9 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar, every page wired to real endpoints, 34 component/interaction tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 15 pages across 17 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 60 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
+| Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
 | Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
 | PostgreSQL verification | Migration chain `0001→0014`, `alembic check`, 60 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6/6), CI job `postgres` |
 | Load | 50 concurrent role-based sessions (reads + WebSockets): 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors; found and fixed a PII-decryption 500 and a hot-loop in the harness | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
@@ -59,7 +60,7 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Real adapters | SMTP, Meta WhatsApp Cloud API, Twilio, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented; only the deterministic fakes are exercised |
 | LLM providers | Anthropic / OpenAI-compatible network calls | Implemented with retries and metering; CI uses `FakeLLM` |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
-| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 27 component tests, not a real browser |
+| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 60 component/token tests, not a real browser (no browser binary is available in this sandbox) |
 | WebSocket at scale | Redis pub/sub fan-out | The hub is in-process; multi-replica deployments need the fan-out documented in `docs/API.md` |
 | Real payment execution | Bank/PSP integration | Deliberately absent: the product records payments made outside it. `payment_suggestion.execution` is literally `outside_platform`, and there is no adapter seam to enable by accident |
 
