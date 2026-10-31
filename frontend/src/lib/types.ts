@@ -416,19 +416,67 @@ export type ExtractedField = {
   verified_at?: string | null;
 };
 
-export type Integration = {
-  id: string;
+export type IntegrationFieldKind = "text" | "password" | "number" | "url" | "email" | "tel" | "select";
+
+export type IntegrationField = {
+  key: string;
+  label_en: string;
+  label_ar: string;
+  kind: IntegrationFieldKind;
+  required: boolean;
+  secret: boolean;
+  placeholder: string;
+  help_en: string;
+  help_ar: string;
+  default: string;
+  options: { value: string; label: string }[];
+};
+
+export type IntegrationProvider = { key: string; label: string; fields: IntegrationField[] };
+
+export type IntegrationKind = {
+  key: string;
+  label_en: string;
+  label_ar: string;
+  description_en: string;
+  description_ar: string;
+  tenant_managed: boolean;
+  providers: IntegrationProvider[];
+};
+
+/** live = a real provider answered; sandbox = platform fake; error = configured but unusable. */
+export type IntegrationStatus = "live" | "sandbox" | "not_configured" | "error" | "disabled";
+
+export type IntegrationItem = {
   kind: string;
-  name?: string;
-  provider?: string;
-  status?: string;
-  config?: Record<string, unknown>;
-  last_tested_at?: string | null;
+  provider: string;
+  provider_source: "tenant" | "platform";
+  platform_provider: string;
+  status: IntegrationStatus;
+  enabled: boolean;
+  tenant_managed: boolean;
+  config: Record<string, string>;
+  secrets_saved: string[];
+  masked: Record<string, string>;
+  missing: string[];
+  last_tested_at: string | null;
+  last_error: string;
+  last_test_ok: boolean | null;
+};
+
+export type IntegrationProbe = {
+  ok: boolean;
+  status: IntegrationStatus;
+  detail: string;
+  latency_ms: number;
+  probe: string;
 };
 
 export type IntegrationsPayload = {
-  items: Integration[];
+  items: IntegrationItem[];
+  catalogue: IntegrationKind[];
   platform_adapters: Record<string, string>;
+  statuses: IntegrationStatus[];
 };
 
 export type ApiKey = {

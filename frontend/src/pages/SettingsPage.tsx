@@ -1,22 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Plug, RefreshCw, Save } from "lucide-react";
+import { Copy, KeyRound, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeading } from "@/components/Shell";
 import { Badge, Card, CardHeader, EmptyState, ErrorState, LoadingBlock, Progress, Spinner, StatusChip, TabList, TabPanel, Tabs, useToast } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { NoAccess } from "@/components/Guard";
+import { IntegrationsPanel } from "@/components/IntegrationsPanel";
 import { useAuth } from "@/lib/session";
 import { PERM } from "@/lib/permissions";
 import { date, money, num } from "@/lib/format";
 import type { AppLang } from "@/i18n";
 import type { FeatureFlag } from "@/lib/types";
-import type { ApiKey, Integration, IntegrationsPayload, Page, Usage } from "@/lib/types";
+import type { ApiKey, Page, Usage } from "@/lib/types";
 
-type Capabilities = {
-  adapters: Record<string, { provider: string; live: boolean; mode: string }>;
-  features: Record<string, boolean>;
-};
 type LlmConfigRow = {
   id: string;
   provider: string;
@@ -65,7 +62,7 @@ export default function SettingsPage() {
       ) : (
         <Tabs value={active} onValueChange={setTab}>
           <TabList items={tabs.map(({ value, label }) => ({ value, label }))} />
-          {can(PERM.adminIntegrations) ? <TabPanel value="integrations"><Integrations lang={lang} /></TabPanel> : null}
+          {can(PERM.adminIntegrations) ? <TabPanel value="integrations"><IntegrationsPanel lang={lang} /></TabPanel> : null}
           {can(PERM.adminApiKeys) ? <TabPanel value="apiKeys"><ApiKeys lang={lang} /></TabPanel> : null}
           {can(PERM.adminLlm) ? <TabPanel value="llm"><LlmSettings lang={lang} /></TabPanel> : null}
           {can(PERM.adminBilling) ? <TabPanel value="billing"><Billing lang={lang} /></TabPanel> : null}
@@ -73,159 +70,6 @@ export default function SettingsPage() {
           <TabPanel value="channels"><ChannelFeatures /></TabPanel>
         </Tabs>
       )}
-    </div>
-  );
-}
-
-function Integrations({ lang }: { lang: AppLang }) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const [testing, setTesting] = useState<string | null>(null);
-  const [form, setForm] = useState({ kind: "email", name: "", config: "{}" });
-  const [saving, setSaving] = useState(false);
-
-  const { can } = useAuth();
-  const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: () => api.get<Capabilities>("/api/v1/meta/capabilities") });
-  const integrations = useQuery({
-    queryKey: ["integrations"],
-    queryFn: () => api.get<IntegrationsPayload>("/api/v1/integrations"),
-    enabled: can(PERM.adminIntegrations),
-  });
-
-  const test = async (kind: string) => {
-    setTesting(kind);
-    try {
-      const result = await api.post<{ ok: boolean; provider?: string; model?: string; error?: string; note?: string }>(`/api/v1/integrations/${kind}/test`);
-      toast.push(`${kind}: ${result.ok ? result.model ?? result.provider ?? "OK" : result.error ?? "failed"}`, result.ok ? "ok" : "danger");
-      await queryClient.invalidateQueries({ queryKey: ["integrations"] });
-    } catch (error) {
-      toast.push(errorMessage(error), "danger");
-    } finally {
-      setTesting(null);
-    }
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      let config: Record<string, unknown> = {};
-      if (form.config.trim()) config = JSON.parse(form.config) as Record<string, unknown>;
-      await api.post("/api/v1/integrations", { kind: form.kind, name: form.name, config });
-      await queryClient.invalidateQueries({ queryKey: ["integrations"] });
-      toast.push(t("common.save"), "ok");
-    } catch (error) {
-      toast.push(errorMessage(error), "danger");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (capabilities.isLoading || integrations.isLoading) return <LoadingBlock rows={6} />;
-  if (capabilities.error) return <ErrorState message={errorMessage(capabilities.error)} onRetry={() => void capabilities.refetch()} />;
-  if (integrations.error) return <ErrorState message={errorMessage(integrations.error)} onRetry={() => void integrations.refetch()} />;
-
-  const rows = Object.entries(capabilities.data?.adapters ?? {});
-  const platform = integrations.data?.platform_adapters ?? {};
-
-  return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <Card>
-        <CardHeader title={t("settings.integrations")} subtitle={t("settings.status")} />
-        <ul className="divide-y divide-line/60">
-          {rows.map(([kind, adapter]) => (
-            <li key={kind} className="flex items-center justify-between gap-2 px-4 py-3">
-              <div>
-                <p className="flex items-center gap-2 text-sm font-medium text-ink">
-                  <Plug className="size-4 text-gold" aria-hidden /> {kind}
-                </p>
-                <p className="text-2xs text-ink-subtle">{adapter.provider} · {adapter.mode}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge tone={adapter.live ? "ok" : "warn"}>{adapter.live ? "live" : "sandbox"}</Badge>
-                <button type="button" className="btn-ghost text-2xs" onClick={() => void test(kind)} disabled={testing === kind}>
-                  {testing === kind ? <Spinner /> : <RefreshCw className="size-3" aria-hidden />}
-                  {t("settings.test")}
-                </button>
-              </div>
-            </li>
-          ))}
-          {rows.length === 0 ? <EmptyState title={t("common.empty")} /> : null}
-        </ul>
-      </Card>
-
-      <div className="space-y-4">
-        <Card>
-          <CardHeader title={`${t("settings.integrations")} · ${t("common.details")}`} />
-          <div className="space-y-3 p-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label" htmlFor="integration-kind">Kind</label>
-                <select id="integration-kind" className="input" value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value })}>
-                  {Object.keys(platform).map((kind) => (
-                    <option key={kind} value={kind}>{kind}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label" htmlFor="integration-name">{t("common.details")}</label>
-                <input id="integration-name" className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Production SMTP" />
-              </div>
-            </div>
-            <div>
-              <label className="label" htmlFor="integration-config">Config (JSON)</label>
-              <textarea
-                id="integration-config"
-                className="input min-h-24 font-mono text-xs"
-                dir="ltr"
-                value={form.config}
-                onChange={(event) => setForm({ ...form, config: event.target.value })}
-                aria-describedby="integration-config-hint"
-              />
-              <p id="integration-config-hint" className="mt-1 text-2xs text-ink-subtle">
-                {t("auth.trust")} · {t("settings.keyOnce")}
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <button type="button" className="btn-primary" onClick={() => void save()} disabled={saving}>
-                {saving ? <Spinner /> : <Save className="size-4" aria-hidden />}
-                {t("common.save")}
-              </button>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader title={t("settings.status")} subtitle={`${integrations.data?.items.length ?? 0}`} />
-          <table className="table-dense">
-            <thead>
-              <tr>
-                <th>{t("settings.integrations")}</th>
-                <th>Config</th>
-                <th>{t("common.status")}</th>
-                <th>{t("common.date")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(integrations.data?.items ?? []).map((row: Integration) => (
-                <tr key={row.id}>
-                  <td className="text-sm">{row.kind}</td>
-                  <td className="max-w-40 truncate text-2xs text-ink-muted" dir="ltr">{JSON.stringify(row.config ?? {})}</td>
-                  <td><StatusChip status={row.status ?? "configured"} /></td>
-                  <td className="text-2xs text-ink-subtle">{date(row.last_tested_at, lang)}</td>
-                </tr>
-              ))}
-              {(integrations.data?.items ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={4}>
-                    <EmptyState title={t("common.empty")} description={t("settings.integrations")} />
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </Card>
-      </div>
     </div>
   );
 }
