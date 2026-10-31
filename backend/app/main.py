@@ -14,9 +14,10 @@ from sqlalchemy import text
 from app.api.router import api_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
-from app.core.errors import install_error_handlers
+from app.core.errors import RateLimited, install_error_handlers
 from app.core.logging import configure_logging
-from app.core.rate_limit import check as rate_check
+from app.core.rate_limit import enforce as rate_enforce
+from app.core.rate_limit import retry_after_seconds as rate_retry_after
 from app.db.session import SessionLocal, engine
 from app.services.bootstrap import bootstrap
 from app.services.migrations import run_migrations
@@ -109,15 +110,20 @@ async def request_context(request: Request, call_next):  # noqa: ANN001
     request.state.request_id = request_id
     started = time.perf_counter()
     try:
-        rate_check(f"ip:{request.client.host if request.client else 'unknown'}")
-    except Exception:
-        retry_after = "60"
+        rate_enforce(request)
+    except RateLimited as exc:
+        retry_after = str(rate_retry_after(exc))
         return JSONResponse(
             {"type": "https://procureai.mantiq.tech/errors/rate_limited", "title": "Rate Limited",
              "status": 429, "code": "rate_limited", "detail": "Too many requests. Retry shortly.",
              "request_id": request_id},
-            status_code=429, headers={"retry-after": retry_after, "x-request-id": request_id},
+            status_code=429,
+            headers={"retry-after": retry_after, "x-request-id": request_id,
+                     "x-ratelimit-scope": "identity"},
         )
+    except Exception:  # pragma: no cover - never let the limiter itself take the API down
+        log.exception("rate limiter failed; allowing the request")
+
     response = await call_next(request)
     latency_ms = int((time.perf_counter() - started) * 1000)
     response.headers["x-request-id"] = request_id

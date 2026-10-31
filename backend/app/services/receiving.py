@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit
 from app.db.models.entities import GoodsReceipt, PurchaseOrder, Supplier, Tenant, User
 from app.services import numbers, p2p
-from app.services.common import next_code, notify, notify_role
+from app.services.common import lock_for_update, next_code, notify, notify_role
 
 log = logging.getLogger("procureai.receiving")
 
@@ -79,8 +79,16 @@ async def mark_in_transit(session: AsyncSession, tenant: Tenant, po: PurchaseOrd
             "expected_at": expected_at.isoformat() if expected_at else None}
 
 
-def _validate_lines(ordered: list[dict], lines: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Normalise submitted receipt lines and collect blocking/notice issues."""
+def _validate_lines(ordered: list[dict], lines: list[dict],
+                    already_received: dict[int, Decimal] | None = None) -> tuple[list[dict], list[dict]]:
+    """Normalise submitted receipt lines and collect blocking/notice issues.
+
+    `already_received` is the accepted quantity booked by earlier receipts (whatever their
+    confirmation state), so the *cumulative* quantity is what gets compared with the order. Checking
+    each receipt in isolation lets two "small" deliveries add up to more than was ordered — a silent
+    over-delivery that the three-way match would happily pay for.
+    """
+    prior = already_received or {}
     by_line = {row["line_no"]: row for row in ordered}
     cleaned: list[dict] = []
     issues: list[dict] = []
@@ -110,10 +118,14 @@ def _validate_lines(ordered: list[dict], lines: list[dict]) -> tuple[list[dict],
             issues.append({"code": "QUANTITY_OVERFLOW", "line_no": line_no,
                            "message": f"Line {line_no}: accepted + rejected exceeds the received quantity."})
             continue
-        if accepted > ordered_row["quantity"] + EPOCH:
+        booked = prior.get(line_no, Decimal("0"))
+        remaining = ordered_row["quantity"] - booked
+        if accepted > remaining + EPOCH:
             issues.append({"code": "OVER_RECEIPT", "line_no": line_no,
-                           "message": (f"Line {line_no}: accepted {accepted} exceeds the ordered "
-                                       f"{ordered_row['quantity']}.")})
+                           "message": (f"Line {line_no}: accepted {accepted} exceeds the "
+                                       f"{numbers.money(max(remaining, Decimal('0')))} still outstanding "
+                                       f"on an order of {ordered_row['quantity']} "
+                                       f"({numbers.money(booked)} already received).")})
             continue
         cleaned.append({
             "line_no": line_no,
@@ -136,12 +148,20 @@ async def create_receipt(session: AsyncSession, tenant: Tenant, po: PurchaseOrde
                          warehouse: str = "", notes: str = "",
                          received_at: datetime | None = None) -> dict:
     """Warehouse records the physical delivery. Over-receipt is rejected, short delivery is not."""
+    # Serialize concurrent receipts for this order: the cumulative-quantity check below is a
+    # read-modify-write on the order's delivered total.
+    locked = await lock_for_update(session, PurchaseOrder, po.id, tenant_id=tenant.id)
+    if locked is not None:
+        po = locked
     if po.status == "closed":
         return {"ok": False, "error": "This purchase order is closed and cannot receive more goods."}
     ordered = po_lines(po)
     if not ordered:
         return {"ok": False, "error": "This purchase order has no lines to receive."}
-    cleaned, issues = _validate_lines(ordered, lines)
+    # Count everything already booked against the order, including receipts still awaiting the
+    # requester's confirmation: an unconfirmed delivery has physically happened.
+    already = await received_totals(session, tenant.id, po.id, statuses=("received", "confirmed"))
+    cleaned, issues = _validate_lines(ordered, lines, already_received=already)
     blocking = [issue for issue in issues if issue["code"] != "SHORT_DELIVERY"]
     if blocking:
         return {"ok": False, "error": blocking[0]["message"], "issues": blocking}

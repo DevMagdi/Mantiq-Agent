@@ -34,6 +34,7 @@ from app.services.suppliers import (
     create_supplier,
     search_suppliers,
     supplier_brief,
+    supplier_briefs,
     update_ratings,
 )
 
@@ -430,7 +431,8 @@ async def suppliers(ctx: Context = Depends(require("supplier:read")), q: str = "
                     page: int = 1, page_size: int = 25):
     rows, total = await search_suppliers(ctx.session, ctx.tenant_id, q, category=category, country=country,
                                          status=status, limit=page_size, offset=(page - 1) * page_size)
-    briefs = [await supplier_brief(ctx.session, ctx.tenant, row) for row in rows]
+    brief_by_id = await supplier_briefs(ctx.session, ctx.tenant, list(rows))
+    briefs = [brief_by_id[row.id] for row in rows]
     return {"items": briefs, "total": total, "page": page}
 
 

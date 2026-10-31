@@ -42,7 +42,7 @@ from app.db.models.entities import (
     Tenant,
 )
 from app.services import numbers
-from app.services.common import next_code, notify
+from app.services.common import lock_for_update, next_code, notify
 from app.services.receiving import po_lines, received_totals
 
 log = logging.getLogger("procureai.accounting")
@@ -357,6 +357,9 @@ async def post_entry(session: AsyncSession, tenant: Tenant, entry: JournalEntry,
                      posted_by: str | None, posted_at: datetime | None = None,
                      allow_own_draft: bool = False) -> dict:
     """Post a draft. Segregation of duties: the poster may not be the drafter unless overridden."""
+    locked = await lock_for_update(session, JournalEntry, entry.id, tenant_id=tenant.id)
+    if locked is not None:
+        entry = locked
     if entry.status == "posted":
         raise AccountingError(f"Entry {entry.number} is already posted.", code="already_posted")
     if entry.status == "reversed":

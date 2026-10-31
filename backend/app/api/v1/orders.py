@@ -139,12 +139,16 @@ async def _timeline(ctx: Context, po: PurchaseOrder, receipts: list[GoodsReceipt
 # ------------------------------------------------------------------ purchase orders
 @router.get("/purchase-orders", summary="List purchase orders")
 async def list_pos(ctx: Context = Depends(require("po:read")), status: str | None = None,
-                   supplier_id: str | None = None, page: int = 1, page_size: int = 25):
+                   supplier_id: str | None = None, rfq_id: str | None = None,
+                   page: int = 1, page_size: int = 25):
     filters = [PurchaseOrder.tenant_id == ctx.tenant_id]
     if status:
         filters.append(PurchaseOrder.status == status)
     if supplier_id:
         filters.append(PurchaseOrder.supplier_id == supplier_id)
+    # "the order this RFQ produced" — the award screen and the auditor trail both need it.
+    if rfq_id:
+        filters.append(PurchaseOrder.rfq_id == rfq_id)
     total = (await ctx.session.execute(
         select(func.count()).select_from(PurchaseOrder).where(*filters)
     )).scalar_one()

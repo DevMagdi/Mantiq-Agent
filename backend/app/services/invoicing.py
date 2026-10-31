@@ -26,7 +26,7 @@ from app.db.models.entities import (
     Tenant,
 )
 from app.services import numbers, p2p
-from app.services.common import notify, notify_role
+from app.services.common import lock_for_update, notify, notify_role
 from app.services.receiving import EPOCH, po_lines, received_totals
 
 log = logging.getLogger("procureai.invoicing")
@@ -389,6 +389,9 @@ async def record_payment(session: AsyncSession, tenant: Tenant, invoice: Supplie
                          amount: Decimal | str, method: str, reference: str = "",
                          paid_at: datetime | None = None, actor_id: str | None = None, note: str = "") -> dict:
     """Book a payment that was executed outside the platform (bank, ERP, cheque)."""
+    locked = await lock_for_update(session, SupplierInvoice, invoice.id, tenant_id=tenant.id)
+    if locked is not None:
+        invoice = locked
     if invoice.status not in PAYABLE_STATUSES:
         return {"ok": False, "error": f"Invoice {invoice.number} is {invoice.status}; approve it before recording a payment."}
     total = numbers.money(numbers.parse_decimal(invoice.total) or Decimal("0"))

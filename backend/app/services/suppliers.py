@@ -228,33 +228,62 @@ async def search_suppliers(session: AsyncSession, tenant_id: str, query: str = "
 
 
 async def supplier_brief(session: AsyncSession, tenant: Tenant, supplier: Supplier) -> dict:
-    contact = await primary_contact(session, tenant, supplier.id)
-    email, phone = await contact_pii(session, tenant, contact) if contact else ("", "")
-    certs = (await session.execute(
-        select(SupplierCertification).where(SupplierCertification.supplier_id == supplier.id)
-    )).scalars().all()
-    return {
-        "id": supplier.id,
-        "name": supplier.name,
-        "name_ar": supplier.name_ar,
-        "country": supplier.country,
-        "city": supplier.city,
-        "website": supplier.website,
-        "status": supplier.status,
-        "overall_score": float(supplier.overall_score or 0),
-        "categories": supplier.categories or [],
-        "contact": {
-            "name": contact.name if contact else "",
-            "email": email,
-            "phone": phone,
-            "language": contact.language if contact else "ar",
-            "email_opt_in": contact.email_opt_in if contact else False,
-            "whatsapp_opt_in": contact.whatsapp_opt_in if contact else False,
-        },
-        "sanctions_status": supplier.sanctions_status,
-        "certifications": [
-            {"code": c.code, "issuer": c.issuer, "expires_at": c.expires_at} for c in certs
-        ],
-        "source_url": supplier.source_url,
-        "confidence": float(supplier.confidence or 0),
-    }
+    briefs = await supplier_briefs(session, tenant, [supplier])
+    return briefs[supplier.id]
+
+
+async def supplier_briefs(session: AsyncSession, tenant: Tenant,
+                          suppliers: list[Supplier]) -> dict[str, dict]:
+    """The list view of many suppliers in two queries instead of two per supplier.
+
+    The supplier list used to fetch the primary contact and the certifications once per row; a
+    25-row page therefore ran ~50 queries. Both lookups are now issued once for the whole page and
+    the same row is picked per supplier (primary first, then oldest), so the payload is unchanged.
+    """
+    if not suppliers:
+        return {}
+    ids = [supplier.id for supplier in suppliers]
+    contacts: dict[str, SupplierContact] = {}
+    for contact in (await session.execute(
+        select(SupplierContact).where(SupplierContact.tenant_id == tenant.id,
+                                      SupplierContact.supplier_id.in_(ids))
+        .order_by(SupplierContact.is_primary.desc(), SupplierContact.created_at.asc())
+    )).scalars().all():
+        contacts.setdefault(contact.supplier_id, contact)
+    certs: dict[str, list[SupplierCertification]] = {}
+    for cert in (await session.execute(
+        select(SupplierCertification).where(SupplierCertification.supplier_id.in_(ids))
+    )).scalars().all():
+        certs.setdefault(cert.supplier_id, []).append(cert)
+
+    briefs: dict[str, dict] = {}
+    for supplier in suppliers:
+        contact = contacts.get(supplier.id)
+        email, phone = await contact_pii(session, tenant, contact) if contact else ("", "")
+        briefs[supplier.id] = {
+            "id": supplier.id,
+            "name": supplier.name,
+            "name_ar": supplier.name_ar,
+            "country": supplier.country,
+            "city": supplier.city,
+            "website": supplier.website,
+            "status": supplier.status,
+            "overall_score": float(supplier.overall_score or 0),
+            "categories": supplier.categories or [],
+            "contact": {
+                "name": contact.name if contact else "",
+                "email": email,
+                "phone": phone,
+                "language": contact.language if contact else "ar",
+                "email_opt_in": contact.email_opt_in if contact else False,
+                "whatsapp_opt_in": contact.whatsapp_opt_in if contact else False,
+            },
+            "sanctions_status": supplier.sanctions_status,
+            "certifications": [
+                {"code": c.code, "issuer": c.issuer, "expires_at": c.expires_at}
+                for c in certs.get(supplier.id, [])
+            ],
+            "source_url": supplier.source_url,
+            "confidence": float(supplier.confidence or 0),
+        }
+    return briefs
