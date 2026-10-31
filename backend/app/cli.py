@@ -167,19 +167,86 @@ def fx_refresh():
 
 @app.command()
 def doctor():
-    """Print environment/config health hints."""
-    typer.echo(json.dumps({
+    """Report what this process actually resolved: database, extensions, adapters, live events.
+
+    Prints no secret values — only whether a variable is set. Exits non-zero when a strict
+    deployment (staging/production) still has an unconfigured or faked critical provider, so the
+    command is usable as a go-live gate in the runbook and in CI.
+    """
+    from sqlalchemy import text
+
+    from app.core import providers
+
+    db: dict[str, object] = {"driver": settings.database_url.split("://")[0]}
+
+    async def _check() -> dict[str, object]:
+        try:
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+                db["connectivity"] = "ok"
+                try:
+                    head = (await session.execute(
+                        text("SELECT version_num FROM alembic_version")
+                    )).scalar_one_or_none()
+                    db["migration_head"] = head or "none"
+                except Exception:  # noqa: BLE001 - a fresh database has no alembic table yet
+                    db["migration_head"] = "none"
+                if "postgresql" in settings.database_url:
+                    rows = (await session.execute(text(
+                        "SELECT extname FROM pg_extension WHERE extname IN "
+                        "('vector', 'pg_trgm', 'citext', 'pgcrypto') ORDER BY extname"
+                    ))).scalars().all()
+                    db["extensions"] = list(rows)
+        except Exception as exc:  # noqa: BLE001 - the report must survive an unreachable database
+            db["connectivity"] = f"failed: {type(exc).__name__}"
+        return db
+
+    _run(_check())
+
+    selected = {
+        "whatsapp": settings.whatsapp_provider,
+        "sms": settings.sms_provider,
+        "telephony": settings.telephony_provider,
+        "llm": settings.llm_provider,
+        "email": settings.email_provider,
+        "search": settings.search_provider,
+        "stt": settings.stt_provider,
+        "ocr": settings.ocr_provider,
+        "erp": settings.erp_provider,
+        "payment": settings.payment_provider,
+    }
+    fakes = providers.fake_selections(settings)
+    critical_fakes = providers.critical_fake_selections(settings)
+    problems = providers.problems(settings)
+    critical_names = {entry.split("=", 1)[0] for entry in critical_fakes}
+    payload = {
         "app_env": settings.app_env,
-        "database": settings.database_url.split("://")[0],
+        "strict_providers": settings.strict_providers,
+        "allow_fake_providers": settings.allow_fake_providers,
+        "database": db["driver"],
+        "database_check": db,
+        "tenant_rls_enabled": settings.tenant_rls_enabled,
         "llm_provider": settings.llm_provider,
-        "email_provider": settings.email_provider,
-        "whatsapp_provider": settings.whatsapp_provider,
-        "telephony_provider": settings.telephony_provider,
-        "search_provider": settings.search_provider,
+        "llm_model": settings.llm_model,
+        "providers": [
+            {"name": name, "selected": value or "fake",
+             "mode": "fake" if (value or "").lower() in providers.FAKE_PROVIDERS else "real",
+             "critical": f"{name.upper()}_PROVIDER" in critical_names}
+            for name, value in selected.items()
+        ],
+        "fakes": fakes,
+        "critical_fakes": critical_fakes,
+        "missing_credentials": problems,
+        "ws_fanout_enabled": settings.ws_fanout_enabled,
+        "redis_configured": bool(settings.redis_url),
         "bootstrap_on_start": settings.bootstrap_on_start,
         "public_url": settings.public_app_url,
-        "note": "Adapters left as 'fake' run in sandbox mode with deterministic data.",
-    }, indent=2))
+        "note": ("Every adapter is real." if not fakes else
+                 "Adapters listed under 'fakes' run in sandbox mode with deterministic data."),
+    }
+    typer.echo(json.dumps(payload, indent=2, default=str))
+    if settings.strict_providers and (problems or critical_fakes):
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

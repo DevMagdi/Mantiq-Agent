@@ -30,7 +30,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "ruff>=0.5"]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  # A real redis-server for the fan-out proof and scripts/e2e_journeys.py. It ships a prebuilt
+  # binary, so CI does not need a Redis service to test multi-replica delivery.
+  "redislite>=6.2",
+]
 
 [project.scripts]
 procureai = "app.cli:app"

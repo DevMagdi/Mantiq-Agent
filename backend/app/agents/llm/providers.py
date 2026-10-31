@@ -1,6 +1,7 @@
 """Anthropic Claude and OpenAI-compatible providers (covers self-hosted vLLM/Ollama)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -13,13 +14,45 @@ from app.agents.llm.base import LLMRequest, LLMResponse, strict_json
 
 log = logging.getLogger("procureai.llm.providers")
 
+ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com"
+OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
+
+#: A model endpoint that is momentarily overloaded must not turn into a failed RFQ. Only the
+#: statuses that mean "try again" are retried; a 400/401 is a configuration bug and fails at once.
+RETRY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504, 529})
+
+
+async def _post_with_retries(client: httpx.AsyncClient, url: str, *, headers: dict[str, str],
+                             payload: dict[str, Any], max_retries: int,
+                             label: str) -> httpx.Response:
+    """POST a completion, retrying transport errors and overload/rate-limit answers only."""
+    attempt = 0
+    while True:
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+        except httpx.TransportError as exc:
+            if attempt >= max_retries:
+                raise RuntimeError(f"{label} is unreachable: {exc}") from exc
+            delay = 0.5 * (2**attempt)
+            log.warning("%s transport error (%s); retrying in %.1fs", label, exc, delay)
+            await asyncio.sleep(delay)
+            attempt += 1
+            continue
+        if response.status_code in RETRY_STATUSES and attempt < max_retries:
+            delay = 0.5 * (2**attempt)
+            log.warning("%s returned %s; retrying in %.1fs", label, response.status_code, delay)
+            await asyncio.sleep(delay)
+            attempt += 1
+            continue
+        return response
+
 
 class AnthropicProvider:
     """Claude via the Messages API. Model name always comes from config, never hard-coded."""
 
     name = "anthropic"
 
-    def __init__(self, api_key: str, model: str, base_url: str = "https://api.anthropic.com",
+    def __init__(self, api_key: str, model: str, base_url: str = ANTHROPIC_DEFAULT_BASE,
                  max_retries: int = 2) -> None:
         self.api_key = api_key
         self.model = model
@@ -50,14 +83,17 @@ class AnthropicProvider:
 
         started = time.perf_counter()
         async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(
+            resp = await _post_with_retries(
+                client,
                 f"{self.base_url}/v1/messages",
                 headers={
                     "x-api-key": self.api_key,
                     "anthropic-version": "2023-06-01",
                     "content-type": "application/json",
                 },
-                json=payload,
+                payload=payload,
+                max_retries=self.max_retries,
+                label="Anthropic",
             )
         if resp.status_code >= 400:
             raise RuntimeError(f"Anthropic error {resp.status_code}: {resp.text[:300]}")
@@ -90,14 +126,18 @@ class OpenAICompatibleProvider:
 
     name = "openai_compatible"
 
-    def __init__(self, api_key: str, model: str, base_url: str = "https://api.openai.com/v1") -> None:
+    def __init__(self, api_key: str, model: str, base_url: str = OPENAI_DEFAULT_BASE,
+                 max_retries: int = 2) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
+        self.max_retries = max_retries
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         if not self.base_url:
             raise RuntimeError("LLM_BASE_URL is not configured")
+        if not self.model:
+            raise RuntimeError("LLM_MODEL is not configured")
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
@@ -117,7 +157,10 @@ class OpenAICompatibleProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
+            resp = await _post_with_retries(
+                client, f"{self.base_url}/chat/completions", headers=headers, payload=payload,
+                max_retries=self.max_retries, label="LLM endpoint",
+            )
         if resp.status_code >= 400:
             raise RuntimeError(f"LLM error {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
@@ -136,14 +179,17 @@ class OpenAICompatibleProvider:
 
 
 def env_configured_provider(provider: str, model: str, api_key: str, base_url: str):
+    """Build a real provider from environment values; None when the selection is not real."""
     if provider == "anthropic" and api_key:
-        return AnthropicProvider(api_key, model)
+        # A gateway in front of Anthropic (LiteLLM, Azure-style proxy) is expressed with LLM_BASE_URL.
+        return AnthropicProvider(api_key, model, base_url or ANTHROPIC_DEFAULT_BASE)
     if provider in {"openai", "openai_compatible", "self_hosted"}:
-        return OpenAICompatibleProvider(api_key, model, base_url or "https://api.openai.com/v1")
+        return OpenAICompatibleProvider(api_key, model, base_url or OPENAI_DEFAULT_BASE)
     return None
 
 
 def provider_from_env() -> Any:
+    """Compatibility entry point that reads the process environment directly (CLI scripts)."""
     provider = os.getenv("LLM_PROVIDER", "fake")
     return env_configured_provider(provider, os.getenv("LLM_MODEL", "claude-sonnet-4-5"),
                                    os.getenv("LLM_API_KEY", ""), os.getenv("LLM_BASE_URL", ""))

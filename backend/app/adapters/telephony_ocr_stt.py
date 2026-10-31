@@ -58,43 +58,69 @@ class FakeTelephonyProvider:
 
 
 class TwilioTelephonyProvider:
-    """Twilio Programmable Voice (outbound) with recording + speech gather."""
+    """Twilio Programmable Voice (outbound) with recording + speech gather.
+
+    The call is placed with inline TwiML that plays the disclosure *before* anything else, gathers the
+    supplier's speech and records only after consent — the order is part of the product, not a detail.
+    Transport goes through the same bounded-retry helper as messaging.
+    """
 
     name = "twilio"
 
-    def __init__(self, sid: str, token: str, from_number: str) -> None:
+    def __init__(self, sid: str, token: str, from_number: str,
+                 base_url: str = "https://api.twilio.com", max_retries: int = 2) -> None:
+        if not sid or not token:
+            raise ValueError("Twilio needs TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
+        if not from_number:
+            raise ValueError("Twilio voice needs a sender number (TELEPHONY_FROM)")
         self.sid = sid
         self.token = token
         self.from_number = from_number
+        self.base_url = base_url.rstrip("/")
+        self.max_retries = max_retries
+
+    @property
+    def _calls_url(self) -> str:
+        return f"{self.base_url}/2010-04-01/Accounts/{self.sid}/Calls.json"
 
     async def place_call(self, *, to: str, script: str, disclosure: str, country: str,
-                         language: str, consent_required: bool) -> CallResult:  # pragma: no cover - network
-        import httpx
+                         language: str, consent_required: bool) -> CallResult:
+        from app.adapters.twilio import normalise_whatsapp, post_form
 
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{self.sid}/Calls.json"
         twiml = (
             f"<Response><Say language='ar-EG'>{disclosure}</Say>"
             "<Gather input='speech' speechTimeout='auto' language='ar-EG'>"
             f"<Say language='ar-EG'>{script[:600]}</Say></Gather>"
             "<Record maxLength='480' playBeep='true'/></Response>"
         )
-        try:
-            async with httpx.AsyncClient(timeout=30, auth=(self.sid, self.token)) as client:
-                resp = await client.post(url, data={"To": to, "From": self.from_number, "Twiml": twiml})
-            data = resp.json()
-            return CallResult(provider_call_id=data.get("sid", ""), status="queued")
-        except Exception as exc:
-            return CallResult(provider_call_id="", status="failed", summary=str(exc)[:200])
+        sent = await post_form(self._calls_url, sid=self.sid, token=self.token,
+                               data={"To": normalise_whatsapp(to), "From": self.from_number,
+                                     "Twiml": twiml},
+                               max_retries=self.max_retries)
+        if not sent.ok:
+            # Never report a queued call that Twilio rejected: the audit trail must say "failed".
+            return CallResult(provider_call_id="", status="failed",
+                              summary=f"Twilio voice error {sent.status_code or ''}: {sent.message}"[:200])
+        return CallResult(provider_call_id=str(sent.body.get("sid", "")),
+                          status=str(sent.body.get("status", "queued")))
 
-    async def fetch_call(self, provider_call_id: str) -> CallResult:  # pragma: no cover - network
+    async def fetch_call(self, provider_call_id: str) -> CallResult:
         import httpx
 
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{self.sid}/Calls/{provider_call_id}.json"
-        async with httpx.AsyncClient(timeout=20, auth=(self.sid, self.token)) as client:
-            resp = await client.get(url)
-        data = resp.json()
+        url = f"{self.base_url}/2010-04-01/Accounts/{self.sid}/Calls/{provider_call_id}.json"
+        try:
+            async with httpx.AsyncClient(timeout=20, auth=(self.sid, self.token)) as client:
+                response = await client.get(url)
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001 - a status probe must not break the console
+            return CallResult(provider_call_id=provider_call_id, status="unknown", summary=str(exc)[:200])
+        if response.status_code >= 400:
+            return CallResult(provider_call_id=provider_call_id, status="unknown",
+                              summary=f"Twilio error {response.status_code}: "
+                                      f"{data.get('message', '')}"[:200])
         return CallResult(provider_call_id=provider_call_id, status=data.get("status", "unknown"),
-                          duration_seconds=int(data.get("duration") or 0))
+                          duration_seconds=int(data.get("duration") or 0),
+                          recording_uri=data.get("subresource_uris", {}).get("recordings", ""))
 
 
 class FakeOcrProvider:

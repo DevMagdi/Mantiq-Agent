@@ -82,3 +82,56 @@ def test_help_lists_every_documented_command():
     for command in ("migrate", "bootstrap", "seed-demo", "create-tenant", "create-user",
                     "reset-password", "purge", "fx-refresh", "doctor"):
         assert command in result.output
+
+
+def test_doctor_is_a_go_live_gate_and_never_prints_a_secret(monkeypatch):
+    """`doctor` is the first command the runbook tells an operator to run: it must be real."""
+    from app.core.config import settings
+
+    ok = runner.invoke(app, ["doctor"])
+    assert ok.exit_code == 0, ok.output
+    body = _json(ok.output)
+    assert body["database_check"]["connectivity"] == "ok"
+    assert body["database_check"]["migration_head"]
+    names = {row["name"] for row in body["providers"]}
+    assert {"whatsapp", "sms", "telephony", "llm", "email"} <= names
+    assert body["ws_fanout_enabled"] is True
+    # A secret value must never appear in the report — only whether the variable is set.
+    for secret in filter(None, [settings.secret_key, settings.llm_api_key,
+                                settings.twilio_auth_token, settings.encryption_master_key]):
+        assert secret not in ok.output
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    blocked = runner.invoke(app, ["doctor"])
+    assert blocked.exit_code == 1, blocked.output
+    assert _json(blocked.output)["critical_fakes"]
+
+
+def test_doctor_reports_a_dead_database_instead_of_crashing(monkeypatch):
+    """A report that dies with the database is useless exactly when it is needed most."""
+    import app.cli as cli_module
+
+    class BrokenSession:
+        async def __aenter__(self):
+            raise OSError("connection refused")
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(cli_module, "SessionLocal", BrokenSession)
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.output
+    assert _json(result.output)["database_check"]["connectivity"] == "failed: OSError"
+
+
+def test_doctor_checks_postgres_extensions_only_when_the_url_is_postgres(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "database_url",
+                        "postgresql+asyncpg://procureai:change-me@db:5432/procureai")
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.output
+    body = _json(result.output)
+    assert body["database"] == "postgresql+asyncpg"
+    # The test database is SQLite, so the extension catalogue is unreachable — and that is reported.
+    assert body["database_check"]["connectivity"].startswith("failed:")

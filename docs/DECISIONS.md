@@ -14,9 +14,11 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
    logic; every rule stays testable without a broker. When Redis is absent the API still works and
    jobs can be triggered by hand (`procureai purge`, `procureai fx-refresh`) or by awaiting the task
    functions directly, which is how the test suite runs them.
-4. **Adapters always ship with a fake.** `registry.resolve(...)` returns the real client only when
-   its credentials exist, otherwise the deterministic fake. This is what makes a 464-test suite
-   hermetic and what lets a demo run with zero external accounts.
+4. **Adapters always ship with a fake — but a fake never reaches a real deployment.** In `dev`/`test`
+   `registry.resolve(...)` still returns the deterministic fake so the suite is hermetic and a demo
+   runs with zero external accounts. In `staging`/`production` the fakes are refused (see §97): the
+   original wording of this entry ("otherwise the deterministic fake") was the shape of the bug this
+   project had to remove.
 5. **No MinIO in dev.** `LocalStorage` implements the same `StorageAdapter` protocol under
    `backend/var/storage`; compose wires MinIO for production.
 
@@ -410,3 +412,90 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
 96. **The dashboard reads the price history once.** The chart and the forecast each ran the same
     query; they now share one pass (the dashboard's own latency fell from ~60 ms to ~33 ms warm,
     on top of the batching above).
+
+## Phase 5 — real providers, live fan-out, browser tests
+
+97. **A fake provider is a startup error in `staging`/`production`.** One table
+    (`app/core/providers.py`) names the variables each provider needs, a second list names the
+    providers that are *critical* (email and LLM always; WhatsApp when the channel is enabled;
+    telephony/STT when AI calls are enabled). `assert_ready()` runs inside the lifespan and refuses to
+    boot with every missing variable in one message; `registry.build` and `default_provider()` raise
+    `ProviderNotConfigured` if a request path asks for a fake anyway. Optional capabilities (SMS,
+    search, OCR, ERP, payments) only log a warning — refusing to boot because nobody configured
+    supplier discovery would be theatre. `ALLOW_FAKE_PROVIDERS=true` is the single, explicit,
+    loudly-logged escape hatch, and it exists for staging demos, not deployments.
+98. **Twilio is the second WhatsApp transport and the only SMS/voice transport.** Most Egyptian and
+    Gulf enterprises already hold a Twilio (or BSP) contract that covers WhatsApp, SMS and voice on
+    one credential pair; Meta's Cloud API stays supported for tenants who prefer it. One adapter
+    family, one retry policy, one signature scheme, three channels. `TELEPHONY_*` remains as an alias
+    so an existing deployment does not break, but `TWILIO_*` wins.
+99. **Only retryable failures are retried, and only twice.** 429/5xx/transport errors back off
+    0.5 s → 1 s; a 4xx (bad number, unapproved template, insufficient funds, rejected call) returns
+    immediately with the vendor's numeric code. Retrying a 400 on a messaging API costs money and
+    duplicates supplier messages; retrying a 429 does not. The same helper serves messaging and voice
+    so the policy cannot drift between channels.
+100. **Webhook signatures are verified or the request is dropped.** Twilio's HMAC-SHA1 over the public
+    URL plus the sorted form parameters; Meta's HMAC-256 for the Cloud API. `TWILIO_WEBHOOK_URL`
+    exists because behind a proxy `request.url` is the internal address and every signature would
+    fail — an operator sets the public URL once. Fixing this uncovered a real hole: the SMS callback
+    decided verification from `WHATSAPP_PROVIDER`, so a deployment with Meta for WhatsApp and Twilio
+    for SMS skipped the check entirely. Verification now follows the provider selected *for that
+    channel*.
+101. **Redis pub/sub, not Streams, for live events.** The feed carries "something changed, refetch"
+    hints; the client already refetches state, so at-most-once delivery is the right contract and a
+    dropped frame costs a stale badge until the next poll, not data. Streams would add consumer-group
+    bookkeeping and replay we have no consumer for. A publish that cannot reach Redis still reaches
+    the local sockets and is logged at error level, because a degraded fan-out is an incident, not a
+    detail.
+102. **Publish locally first, and never echo your own envelope.** Each process has an origin id; the
+    local broadcast happens before the Redis round trip (a socket on this replica must not wait on the
+    network) and the listener skips envelopes with its own origin. This is what keeps a single-replica
+    dev box fast and makes duplicate frames impossible under fan-out.
+103. **Structured answers come from a forced tool call, never from parsing prose.** Anthropic gets
+    `tool_choice: {type: tool, name: emit_structured_output}` and the schema as that tool's
+    `input_schema`; OpenAI-compatible endpoints get `response_format: {type: json_object}` plus the
+    schema in a system message. Free-text extraction is what silently invents quantities.
+104. **`LLM_BASE_URL` means two different things, deliberately.** For Anthropic it is a *gateway* in
+    front of `/v1/messages` (default `https://api.anthropic.com`); for an OpenAI-compatible endpoint it
+    is the versioned base (`https://api.openai.com/v1`, `http://vllm:8000/v1`). The path is appended,
+    never guessed, and `docs/ENVIRONMENT.md` says so next to the variable.
+105. **SMS is a first-class channel, not an afterthought.** Several suppliers in the target market have
+    no WhatsApp but do have a phone; `send_message` grows an `sms` branch with the same consent,
+    policy and dispatch bookkeeping as the others, and inbound SMS goes through the same extraction
+    pipeline. `docs/ENVIRONMENT.md` lists what it needs.
+106. **The test suite proves the real clients over a real socket.** Every provider test starts a local
+    HTTP server that speaks the vendor's wire format (`tests/test_adapters_twilio.py`,
+    `tests/test_llm_real_path.py`, `tests/test_ws_fanout.py` starts a real `redis-server`). Nothing
+    inside the application is patched; only the vendor's own service is replaced by one we control,
+    because a vendor account cannot exist in CI.
+107. **Ship the browser suite; do not pretend to run it.** `frontend/e2e` covers sign-in/out, the
+    RTL↔English switch, every route and the WebSocket handshake, and `npm run e2e:typecheck` runs in
+    CI. The browsers themselves cannot be downloaded in this sandbox (the Playwright CDN is blocked),
+    so no run is claimed. The same journeys *are* executed without a browser by
+    `scripts/e2e_journeys.py`.
+108. **The headless journeys start the real stack.** `scripts/e2e_journeys.py` migrates a database,
+    bootstraps the demo tenant, starts a real Redis and **two** uvicorn replicas, then drives HTTP and
+    two WebSockets: it asserts an unsigned webhook is refused, a signed one is accepted, the
+    resulting event reaches both replicas, and a supplier reply is read by a real LLM over HTTP. It is
+    in CI, so "it works across replicas" is a build artefact, not a claim.
+109. **Templates are versioned, never edited in place.** `POST /templates` deactivates the previous
+    version and inserts the next one; the UI offers "new version" rather than "edit". A message that
+    was sent must always be explainable by the template text of its time.
+110. **The extraction list exposes the model that produced it.** Reviewers can see whether a real
+    provider or the deterministic fallback read a supplier's offer; without that field an operator
+    cannot tell a degraded deployment from a normal one.
+111. **The rate limiter is honest about being per-process.** Buckets live in memory, keyed by user id
+    and address, which is correct for one replica and multiplies the effective budget by the replica
+    count. It is documented (not silently "solved") because a Redis-backed limiter is the next change,
+    and a fake distributed limiter would be worse than none.
+112. **`doctor` is a gate, not a fortune cookie.** The command reports what the process actually
+    resolved — database connectivity, migration head, extensions, every adapter's mode — and **exits
+    non-zero** when a staging/production box still has an unconfigured or faked critical provider, so
+    the runbook's first step is also a machine-checkable pre-flight. It never prints a secret value,
+    only whether the variable is set, and it degrades to `connectivity: failed` instead of crashing
+    when the database is unreachable — the report is needed most exactly then.
+113. **The environment contract is a test, not a promise.** `docs/ENVIRONMENT.md` claiming "every
+    variable" is worth nothing if it silently rots: `tests/test_env_docs.py` fails the build when a
+    `Settings` field is undocumented, when `deploy/.env.example` declares a variable nothing reads, or
+    when the template ships something that looks like a live credential. Adding a setting now requires
+    documenting it in the same commit.

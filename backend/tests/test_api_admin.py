@@ -5,6 +5,8 @@ SQLite database built by the shipped Alembic migrations.
 """
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from tests.conftest import DEMO_PASSWORD, unique
 
 
@@ -209,12 +211,26 @@ async def test_llm_config_requires_admin_permission_and_accepts_override(client,
     denied = await client.get("/api/v1/llm-config", headers=manager["headers"])
     assert denied.status_code == 403
 
-    put = await client.put("/api/v1/llm-config", headers=admin["headers"], json={
-        "provider": "fake", "model": "fake-deterministic-1", "monthly_token_budget": 100000,
-    })
-    assert put.status_code == 200
-    current = await client.get("/api/v1/llm-config", headers=admin["headers"])
-    assert current.json()["items"][0]["provider"] == "fake"
+    try:
+        put = await client.put("/api/v1/llm-config", headers=admin["headers"], json={
+            "provider": "fake", "model": "fake-deterministic-1", "monthly_token_budget": 100000,
+        })
+        assert put.status_code == 200
+        current = await client.get("/api/v1/llm-config", headers=admin["headers"])
+        assert current.json()["items"][0]["provider"] == "fake"
+    finally:
+        # The tenant override would otherwise decide the LLM for every later test in this suite.
+        from sqlalchemy import delete
+
+        from app.db.models.entities import LlmProviderConfig, Tenant
+        from app.db.session import SessionLocal
+
+        async with SessionLocal() as session:
+            tenant = (await session.execute(
+                select(Tenant).where(Tenant.slug == "nile"))).scalar_one()
+            await session.execute(delete(LlmProviderConfig).where(
+                LlmProviderConfig.tenant_id == tenant.id))
+            await session.commit()
 
 
 # ------------------------------------------------------------------- governance

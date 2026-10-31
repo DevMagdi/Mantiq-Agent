@@ -213,6 +213,7 @@ async def send_message(
     available = (
         (channel == "email" and bool(email))
         or (channel == "whatsapp" and bool(phone))
+        or (channel == "sms" and bool(phone))   # Twilio SMS: the fallback for a phone-only supplier
         or channel == "web_form"
         or channel == "phone"
     )
@@ -278,6 +279,11 @@ async def send_message(
                 result = await provider.send_text(to=phone, body=body)
         else:
             result = await provider.send_text(to=phone, body=body)
+        provider_id, error = result.provider_message_id, result.error
+    elif channel == "sms":
+        # SMS has no rich media and no template registry: the rendered text is the message.
+        provider = registry.resolve("sms")
+        result = await provider.send_text(to=phone, body=body)
         provider_id, error = result.provider_message_id, result.error
     elif channel == "web_form":
         link = await create_web_form_link(session, tenant, rfq, supplier.id)

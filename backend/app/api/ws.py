@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.security import decode_token
+from app.services.events import bus
 
 log = logging.getLogger("procureai.ws")
 router = APIRouter()
@@ -28,7 +29,8 @@ class Hub:
         async with self._lock:
             self._rooms.get(tenant_id, set()).discard(ws)
 
-    async def broadcast(self, tenant_id: str, event: str, payload: dict[str, Any]) -> None:
+    async def broadcast_local(self, tenant_id: str, event: str, payload: dict[str, Any]) -> None:
+        """Send to the sockets that live in *this* process (the fan-out calls it per replica)."""
         # `type` is the field every client reads; `event` is kept so older subscribers and the
         # documented payload shape keep working.
         message = json.dumps({"type": event, "event": event, "payload": payload}, default=str)
@@ -38,6 +40,10 @@ class Hub:
             with contextlib.suppress(Exception):
                 await ws.send_text(message)
 
+    async def broadcast(self, tenant_id: str, event: str, payload: dict[str, Any]) -> None:
+        """Publish to every replica (Redis) and to this process' sockets."""
+        await bus.publish(tenant_id, event, payload)
+
     def connection_count(self, tenant_id: str | None = None) -> int:
         if tenant_id:
             return len(self._rooms.get(tenant_id, set()))
@@ -45,15 +51,13 @@ class Hub:
 
 
 hub = Hub()
+# The bus always knows how to reach this process' sockets; the lifespan adds the Redis transport.
+bus.attach_local(hub.broadcast_local)
 
 
 def publish(tenant_id: str, event: str, payload: dict[str, Any]) -> None:
     """Fire-and-forget publish from sync services (safe if no loop is running)."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    loop.create_task(hub.broadcast(tenant_id, event, payload))
+    bus.publish_soon(tenant_id, event, payload)
 
 
 def _is_ping(raw: str) -> bool:
