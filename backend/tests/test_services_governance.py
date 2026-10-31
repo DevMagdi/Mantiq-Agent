@@ -78,6 +78,12 @@ async def test_chain_requires_each_role_in_order(client, manager, buyer, finance
                                  json={"decision": "approve", "comment": "Value is competitive"})
     assert approved.status_code == 200, approved.text
 
+    # Double-clicking "approve" (or two managers deciding at once) must not look like a second success.
+    again = await client.post(f"/api/v1/approvals/{first['id']}/decide", headers=manager["headers"],
+                              json={"decision": "reject", "comment": "Changed my mind"})
+    assert again.status_code == 422, again.text
+    assert "approved" in again.text
+
     # A later step (if any) must now be pending for finance.
     chain = (await client.get("/api/v1/approvals", headers=finance["headers"])).json()["items"]
     next_steps = [row for row in chain if row["rfq_id"] == rfq_id and row["status"] == "pending"]
