@@ -183,16 +183,24 @@ async def test_integrations_crud_and_probe(client, admin):
                                       "secrets": {"password": "s3cr3t"}})
     assert created.status_code in {200, 201}
 
+    # The old screen reported `ok: true` for anything that "resolved". A probe now has to prove a
+    # real call: a platform fake is reported as sandbox, never as a success.
     probe = await client.post("/api/v1/integrations/email/test", headers=admin["headers"])
     assert probe.status_code == 200 and "ok" in probe.json()
+    assert probe.json()["ok"] is False or probe.json()["status"] == "live"
     llm_probe = await client.post("/api/v1/integrations/llm/test", headers=admin["headers"])
-    assert llm_probe.status_code == 200 and llm_probe.json()["ok"] is True
+    assert llm_probe.status_code == 200
+    assert llm_probe.json()["ok"] is False
+    assert llm_probe.json()["status"] in {"sandbox", "error", "not_configured"}
     erp_probe = await client.post("/api/v1/integrations/erp/test", headers=admin["headers"])
     assert erp_probe.status_code == 200
 
     after = await client.get("/api/v1/integrations", headers=admin["headers"])
     row = next(r for r in after.json()["items"] if r["kind"] == "email")
     assert "password" not in str(row.get("config") or {})
+    assert "s3cr3t" not in after.text
+    assert row["secrets_saved"] == ["password"] and row["masked"]["password"].endswith("cr3t")
+    await client.delete("/api/v1/integrations/email", headers=admin["headers"])
 
 
 async def test_api_keys_are_shown_once_and_revocable(client, admin):

@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.base import registry
 from app.agents.policy_engine import check_dispatch
 from app.core.config import settings
 from app.core.security import sign_payload
@@ -26,6 +25,7 @@ from app.db.models.entities import (
     Tenant,
     WebFormToken,
 )
+from app.services import integrations as integration_adapters
 from app.services import numbers
 from app.services.common import meter, notify
 from app.services.suppliers import contact_pii, primary_contact
@@ -249,12 +249,12 @@ async def send_message(
     provider_id = ""
     error = ""
     if channel == "email":
-        provider = registry.resolve("email")
+        provider = await integration_adapters.adapter_for(session, tenant, "email")
         result = await provider.send(to=email, subject=subject, body=body, html=_html(body),
                                      reply_to=settings.smtp_from)
         provider_id, error = result.provider_message_id, result.error
     elif channel == "whatsapp":
-        provider = registry.resolve("whatsapp")
+        provider = await integration_adapters.adapter_for(session, tenant, "whatsapp")
         if interactive:
             result = await provider.send_interactive(
                 to=phone, body=interactive.get("body", body),
@@ -282,7 +282,7 @@ async def send_message(
         provider_id, error = result.provider_message_id, result.error
     elif channel == "sms":
         # SMS has no rich media and no template registry: the rendered text is the message.
-        provider = registry.resolve("sms")
+        provider = await integration_adapters.adapter_for(session, tenant, "sms")
         result = await provider.send_text(to=phone, body=body)
         provider_id, error = result.provider_message_id, result.error
     elif channel == "web_form":

@@ -69,6 +69,18 @@ async def provider_for_tenant(session: AsyncSession, tenant: Tenant) -> Any:
     cache_key = f"tenant:{tenant.id}"
     if cache_key in _CACHE:
         return _CACHE[cache_key]
+    # The Integrations screen is the first-class path: a tenant that saved and enabled a real model
+    # there is served by it. The older `LlmProviderConfig` admin form remains the fallback, and the
+    # platform default is last.
+    from app.services import integrations as integration_service
+
+    ready = await integration_service.configured(session, tenant, "llm")
+    if ready:
+        provider_key, config, secrets = ready
+        provider = integration_service.build_from("llm", provider_key, config, secrets)
+        _CACHE[cache_key] = provider
+        return provider
+
     config = (await session.execute(
         select(LlmProviderConfig).where(LlmProviderConfig.tenant_id == tenant.id,
                                         LlmProviderConfig.is_default.is_(True))

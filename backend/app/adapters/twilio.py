@@ -178,6 +178,22 @@ class _TwilioMessaging:
         return await self.send_text(to=to, body=f"{numbered}\n\nReply with the number.")
 
 
+async def fetch_account(sid: str, token: str, base_url: str = DEFAULT_BASE) -> TwilioResponse:
+    """`GET /Accounts/{sid}` — the cheapest honest proof that a sid/token pair works."""
+    url = f"{(base_url or DEFAULT_BASE).rstrip('/')}/2010-04-01/Accounts/{sid}.json"
+    try:
+        async with httpx.AsyncClient(timeout=15,
+                                     auth=httpx.BasicAuth(sid, token)) as client:
+            resp = await client.get(url)
+    except httpx.HTTPError as exc:
+        return TwilioResponse(error=f"{type(exc).__name__}: {exc}"[:300])
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    return TwilioResponse(status_code=resp.status_code, body=body)
+
+
 class TwilioWhatsAppProvider(_TwilioMessaging):
     """WhatsApp over Twilio Programmable Messaging (real API, no fake fallback)."""
 

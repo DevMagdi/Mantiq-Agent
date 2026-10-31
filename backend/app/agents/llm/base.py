@@ -144,6 +144,11 @@ class MeteredLLM:
         self.name = getattr(provider, "name", "provider")
         self.model = getattr(provider, "model", "model")
 
+    @property
+    def provider(self) -> LLMProvider:
+        """The wrapped provider — callers must be able to see which model is really in use."""
+        return self._provider
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         started = time.perf_counter()
         response = await self._provider.complete(request)

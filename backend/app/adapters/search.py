@@ -83,18 +83,26 @@ class FakeSearchProvider:
         return results
 
 
+SERPAPI_BASE = "https://serpapi.com"
+BRAVE_BASE = "https://api.search.brave.com"
+
+
 class SerpApiSearchProvider:
     name = "serpapi"
 
-    def __init__(self, api_key: str, crawler: PageFetcher | None = None) -> None:
+    def __init__(self, api_key: str, crawler: PageFetcher | None = None,
+                 base_url: str = SERPAPI_BASE) -> None:
         self.api_key = api_key
         self.crawler = crawler or PageFetcher()
+        # A base URL is what lets an operator point at a proxy/regional gateway - and what lets the
+        # test suite prove the real client over a real socket instead of patching it.
+        self.base_url = base_url.rstrip("/")
 
     async def search(self, query: str, *, limit: int = 10, country: str = "EG") -> list[SearchHit]:
         params = {"engine": "google", "q": query, "api_key": self.api_key, "num": min(limit, 20),
                   "gl": country.lower(), "hl": "ar" if country == "EG" else "en"}
         async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.get("https://serpapi.com/search.json", params=params)
+            resp = await client.get(f"{self.base_url}/search.json", params=params)
         data = resp.json()
         return [
             SearchHit(title=item.get("title", ""), url=item.get("link", ""),
@@ -128,14 +136,15 @@ class SerpApiSearchProvider:
 class BraveSearchProvider:
     name = "brave"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, base_url: str = BRAVE_BASE) -> None:
         self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
 
     async def search(self, query: str, *, limit: int = 10, country: str = "EG") -> list[SearchHit]:
         headers = {"X-Subscription-Token": self.api_key, "Accept": "application/json"}
         params = {"q": query, "count": min(limit, 20), "country": country}
         async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.get("https://api.search.brave.com/res/v1/web/search",
+            resp = await client.get(f"{self.base_url}/res/v1/web/search",
                                     headers=headers, params=params)
         data = resp.json()
         return [
@@ -146,7 +155,7 @@ class BraveSearchProvider:
 
     async def discover_suppliers(self, query: str, *, country: str = "EG",
                                  limit: int = 24) -> list[SupplierCandidateData]:
-        return await SerpApiSearchProvider(self.api_key).discover_suppliers(
+        return await SerpApiSearchProvider(self.api_key, base_url=self.base_url).discover_suppliers(
             query, country=country, limit=limit
         )
 
@@ -223,9 +232,9 @@ class PageFetcher:
             return ""
 
 
-def build_search_provider(kind: str, api_key: str) -> Any:
+def build_search_provider(kind: str, api_key: str, base_url: str = "") -> Any:
     if kind == "serpapi" and api_key:
-        return SerpApiSearchProvider(api_key)
+        return SerpApiSearchProvider(api_key, base_url=base_url or SERPAPI_BASE)
     if kind == "brave" and api_key:
-        return BraveSearchProvider(api_key)
+        return BraveSearchProvider(api_key, base_url=base_url or BRAVE_BASE)
     return FakeSearchProvider()

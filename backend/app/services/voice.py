@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.base import ExtractionPayload, registry
+from app.adapters.base import ExtractionPayload
 from app.agents.policy_engine import check_dispatch
 from app.db.models.entities import RFQ, CountryCallPolicy, RFQSupplier, Supplier, Tenant, VoiceCall
+from app.services import integrations as integration_adapters
 from app.services.common import meter, notify
 from app.services.extraction import extract_offer
 from app.services.messaging import opt_in_status
@@ -68,7 +69,8 @@ async def start_call(session: AsyncSession, tenant: Tenant, *, rfq: RFQ, supplie
 
     call = VoiceCall(
         tenant_id=tenant.id, rfq_id=rfq.id, supplier_id=supplier.id,
-        provider=getattr(registry.resolve("telephony"), "name", "fake"), status="dialing",
+        provider=getattr(await integration_adapters.adapter_for(session, tenant, "telephony"),
+                        "name", "fake"), status="dialing",
         country=supplier.country, language=language,
         policy_snapshot={
             "allowed_hours": [policy.allowed_hours_start, policy.allowed_hours_end],
@@ -80,7 +82,7 @@ async def start_call(session: AsyncSession, tenant: Tenant, *, rfq: RFQ, supplie
     session.add(call)
     await session.flush()
 
-    provider = registry.resolve("telephony")
+    provider = await integration_adapters.adapter_for(session, tenant, "telephony")
     result = await provider.place_call(to=phone, script=script, disclosure=disclosure,
                                        country=supplier.country, language=language,
                                        consent_required=policy.recording_consent_mode == "explicit")

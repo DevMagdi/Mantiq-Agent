@@ -64,6 +64,27 @@ class SmtpEmailProvider:
         self.sender = sender
         self.imap_host = imap_host or host
 
+    def _verify_sync(self) -> tuple[bool, str]:
+        """Connect, EHLO, STARTTLS and log in — without sending a message."""
+        try:
+            with smtplib.SMTP(self.host, int(self.port), timeout=10) as server:
+                server.ehlo()
+                if int(self.port) != 25:
+                    try:
+                        server.starttls()
+                        server.ehlo()
+                    except smtplib.SMTPNotSupportedError:
+                        pass
+                if self.user:
+                    server.login(self.user, self.password)
+                _code, message = server.noop()
+            return True, f"SMTP {self.host}:{self.port} reachable"
+        except Exception as exc:  # noqa: BLE001 - the probe must report, never raise
+            return False, f"{type(exc).__name__}: {exc}"[:300]
+
+    async def verify(self) -> tuple[bool, str]:
+        return await asyncio.to_thread(self._verify_sync)
+
     def _send_sync(self, to: str, subject: str, body: str, html: str, reply_to: str) -> SendResult:
         msg = EmailMessage()
         msg["From"] = self.sender

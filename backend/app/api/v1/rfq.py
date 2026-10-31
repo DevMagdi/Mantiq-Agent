@@ -593,43 +593,43 @@ async def inbound(channel: str, request: Request):
     WhatsApp goes through the phase-3 channel service, which handles delivery receipts, consent
     keywords and media downloads *before* the shared extraction pipeline sees the text.
     """
-    from app.adapters.base import registry
+    from urllib.parse import parse_qs
+
+    from app.adapters.twilio import TwilioSmsProvider, TwilioWhatsAppProvider
+    from app.adapters.whatsapp import CloudWhatsAppProvider
     from app.core.config import settings
     from app.db.session import SessionLocal
+    from app.services import integrations as integration_adapters
     from app.services import whatsapp_channel
 
     body = await request.body()
-    provider = registry.resolve("whatsapp") if channel == "whatsapp" else (
-        registry.resolve("sms") if channel == "sms" else None)
-    form_payload: dict[str, str] | None = None
-    # The Twilio check must follow the provider selected *for this channel*: WhatsApp can run on the
-    # Meta Cloud API while SMS runs on Twilio, and vice versa. Reading WHATSAPP_PROVIDER for an SMS
-    # callback would skip signature verification on a public endpoint.
-    twilio_channel = ((channel == "whatsapp" and settings.whatsapp_provider == "twilio")
-                      or (channel == "sms" and settings.sms_provider == "twilio"))
-    if channel == "whatsapp" and settings.whatsapp_provider == "cloud_api":
-        signature = request.headers.get("x-hub-signature-256", "")
-        if not provider.verify_webhook(body, signature):
-            return Response(status_code=401, content='{"error":"invalid signature"}')
-    elif twilio_channel:
-        # Twilio posts application/x-www-form-urlencoded with an X-Twilio-Signature header computed
-        # over the full public URL plus the sorted POST parameters.
-        from urllib.parse import parse_qs
-
-        from app.core.config import settings as _settings
-
-        signature = request.headers.get("x-twilio-signature", "")
-        callback_url = _settings.twilio_webhook_url or str(request.url)
-        if not provider.verify_webhook(body, signature, callback_url):
-            return Response(status_code=401, content='{"error":"invalid signature"}')
-        form_payload = {key: values[-1] for key, values in
-                        parse_qs(body.decode(), keep_blank_values=True).items()}
     async with SessionLocal() as session:
         tenant = (await session.execute(
             select(Tenant).where(Tenant.slug == request.headers.get("x-tenant-slug", "nile"))
         )).scalar_one_or_none()
         if not tenant:
             raise NotFound("Tenant not found.")
+
+        # The provider is resolved *for this tenant*: a signature must be checked with the credentials
+        # that tenant saved on the Integrations screen, not with whatever the platform default is.
+        provider = None
+        if channel in {"whatsapp", "sms"}:
+            provider = await integration_adapters.adapter_for(session, tenant, channel)
+
+        form_payload: dict[str, str] | None = None
+        if channel == "whatsapp" and isinstance(provider, CloudWhatsAppProvider):
+            signature = request.headers.get("x-hub-signature-256", "")
+            if not provider.verify_webhook(body, signature):
+                return Response(status_code=401, content='{"error":"invalid signature"}')
+        elif isinstance(provider, (TwilioWhatsAppProvider, TwilioSmsProvider)):
+            # Twilio posts application/x-www-form-urlencoded and signs `url + sorted(params)`.
+            signature = request.headers.get("x-twilio-signature", "")
+            callback_url = settings.twilio_webhook_url or str(request.url)
+            if not provider.verify_webhook(body, signature, callback_url):
+                return Response(status_code=401, content='{"error":"invalid signature"}')
+            form_payload = {key: values[-1] for key, values in
+                            parse_qs(body.decode(), keep_blank_values=True).items()}
+
         payload = form_payload if form_payload is not None else await request.json()
         if channel == "whatsapp":
             handled = await whatsapp_channel.handle_webhook(session, tenant, payload)
