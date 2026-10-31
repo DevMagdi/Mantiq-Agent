@@ -133,6 +133,12 @@ jobs:
           PY
 
       - name: Seed the demo dataset through the CLI (also proves the CLI works on PostgreSQL)
+        env:
+          # The demo chart of accounts is part of that dataset, and it is only seeded when the
+          # accounting module is on (a pilot install must not carry a chart of accounts it cannot
+          # show). The concurrency proof below posts a journal entry against those accounts, so this
+          # step opts in explicitly instead of relying on a default that no longer exists.
+          ACCOUNTING_ENABLED: "true"
         run: python -m app.cli seed-demo
 
       - name: Tenant isolation is enforced by RLS
