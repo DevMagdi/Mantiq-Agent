@@ -12,7 +12,7 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (731 backend tests, 76 frontend tests, 88 % backend line coverage) and the real command
+Test counts (746 backend tests, 84 frontend tests, 88 % backend line coverage) and the real command
 output are reproduced in `docs/PR_PHASE5.md`.
 
 ## Functional requirements
@@ -113,7 +113,7 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | NFR-AUD-1 | Every status transition leaves an audit row | `app/core/audit.py` + the API/service calls that own each transition | `tests/test_api_phase4_full_cycle.py` step 16 (17 named actions across the cycle) | Done |
 | NFR-PERF-2 | Reply parsing bounded (20k chars, no unbounded LLM context) | `app/services/extraction.py` | `tests/test_services_extraction.py` | Done |
 | NFR-PRV-1 | Data-subject rights with statutory deadlines | `app/services/privacy.py`, `data_erasure_request.due_at` | `tests/test_services_privacy_portal.py` | Done |
-| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (74 tests), `frontend/src/styles/tokens.test.ts` (single theme, no `prefers-color-scheme`, every text pair ≥ 4.5:1), contrast matrix in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI; contrast, focus and RTL are asserted, not audited by a browser |
+| NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (84 tests), `frontend/src/styles/tokens.test.ts` (single theme, no `prefers-color-scheme`, every text pair ≥ 4.5:1), contrast matrix in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI; contrast, focus and RTL are asserted, not audited by a browser |
 | NFR-OPS-1 | Health/readiness/observability | `app/main.py` `/health` `/ready` `/metrics` | `tests/test_api_flow.py` | Done |
 | NFR-AI-3 | Channel and voice agents must be unable to commit the company, disclose competitors or change specifications; every block is recorded | `voice_agent.classify_question`, `assistant.FORBIDDEN_PATTERNS`, `channel_event` / `voice_call_turn` | `tests/test_services_voice_agent.py` (four block codes + refusal text), `tests/test_services_assistant.py` (`ASSISTANT_FORBIDDEN_ACTION`) | Done |
 | NFR-SEC-5 | Supplier consent is per channel and honoured in the supplier's own words before any parsing | `messaging.handle_consent_keyword` (STOP/START, AR+EN), `OptInRegistry`, `channel_event` | `tests/test_services_whatsapp.py::test_a_stop_keyword_opts_the_supplier_out_and_stops_the_pipeline`, `tests/test_services_channels.py::test_an_email_unsubscribe_is_honoured_before_extraction_on_any_channel` | Done |
@@ -167,7 +167,10 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | P5-5 | Live events reach clients on every replica | `app/services/events.py`, `app/api/ws.py` | `tests/test_ws_fanout.py` (6, real `redis-server`), `scripts/e2e_journeys.py` (two uvicorn replicas) | Done |
 | P5-6 | Every environment variable documented and validated | `docs/ENVIRONMENT.md` (all 83 settings), `deploy/.env.example`, `app/cli.py::doctor` | `tests/test_env_docs.py` (5 — every setting documented, no phantom variable, no secret in the template), `tests/test_cli.py` (doctor reports modes and fails a strict deployment) | Done |
 | P5-7 | Browser end-to-end suite | `frontend/e2e/*.spec.ts`, `frontend/playwright.config.ts` | `npm run e2e:typecheck` in CI | Partial — written and typechecked, not executed: no browser binary can be downloaded here |
-| P5-8 | End-to-end journeys executed against the real stack | `scripts/e2e_journeys.py` | 13 journeys, CI job `backend` | Done |
+| P5-8 | End-to-end journeys executed against the real stack | `scripts/e2e_journeys.py` | 15 journeys, CI job `backend` | Done |
+| P5-9 | A tenant administrator can configure each provider from the screen — status, real per-provider fields, save, **Test connection**, enable/disable, a verdict after every action, persistence across a reload | `app/services/integrations.py` (catalogue + computed status + `adapter_for`), `app/api/v1/admin.py` (integrations endpoints + audit), migration `0017_tenant_integrations`, `frontend/src/components/IntegrationsPanel.tsx` | `tests/test_api_integrations.py` (15, vendor-shaped Twilio/Meta/SerpAPI/SMTP servers), `frontend/src/components/integrations.test.tsx` (8), `scripts/e2e_journeys.py` journeys `integrations` and `integration safety` | Done (vendor endpoints replaced by local servers; live accounts need the tenant's own credentials) |
+| P5-10 | Secrets encrypted at rest, masked in every response, and every credential change audited | `EncryptedString`/`encrypt_text` on `IntegrationConfig.secrets_enc`, `integration_service.mask`, audit rows `integration.configured` / `.secrets_updated` / `.enabled` / `.disabled` / `.removed` / `.tested` | `tests/test_api_integrations.py` (masking, keep-on-blank, audit) | Done |
+| P5-11 | A complete, enabled tenant configuration is what the runtime uses — no silent fallback to a fake — and disabling restores the platform adapter | `integration_service.configured`/`adapter_for` used by messaging, voice, WhatsApp channel, discovery, RFQ dispatch and the LLM factory | `tests/test_api_integrations.py`, e2e `integrations` (`llm=live, whatsapp=live, platform still fake`) and `integration safety` (no vendor call while disabled) | Done |
 
 ## What is not covered here
 

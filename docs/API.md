@@ -273,9 +273,11 @@ Twilio's `application/x-www-form-urlencoded` callback and verify `X-Twilio-Signa
 (HMAC-SHA1 over the public URL plus the sorted parameters, base64). An unsigned or mismatched request
 is refused with `401` before any parsing. The URL used for the check is `TWILIO_WEBHOOK_URL` when set
 (behind a proxy `request.url` is the internal address) and `str(request.url)` otherwise. The provider
-that decides the verification is the one configured **for that channel**, so a deployment can run
-Meta for WhatsApp and Twilio for SMS without either callback skipping verification. Status callbacks
-map to delivery receipts; inbound SMS runs through the same extraction pipeline as email.
+that decides the verification is the one resolved **for that channel and that tenant**: a tenant that
+saved Twilio credentials on the Integrations screen is verified against its own auth token, and a
+deployment can run Meta for WhatsApp and Twilio for SMS without either callback skipping verification.
+Status callbacks map to delivery receipts; inbound SMS runs through the same extraction pipeline as email.
+
 
 **Inbox.** `GET /inbox` groups messages by (RFQ, supplier) thread, not by channel, so a WhatsApp reply
 appears next to the email that started the thread. `reply_channel` is the channel of the supplier's
@@ -397,9 +399,12 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/intake/scan` | Scanned / photographed request via OCR | intake |
 | POST | `/api/v1/intake/text` | Create a requisition from free text (AR/EN) | intake |
 | POST | `/api/v1/intake/voice` | Voice request via the STT adapter | intake |
-| GET | `/api/v1/integrations` | Integration configuration (secrets masked) | admin |
-| POST | `/api/v1/integrations` | Configure an integration (secrets envelope-encrypted) | admin |
-| POST | `/api/v1/integrations/{kind}/test` | Test an integration | admin |
+| GET | `/api/v1/integrations` | Provider statuses, field catalogue and masked secrets | admin |
+| PUT | `/api/v1/integrations/{kind}` | Save credentials (envelope-encrypted) and enable | admin |
+| PATCH | `/api/v1/integrations/{kind}` | Enable / disable one integration | admin |
+| DELETE | `/api/v1/integrations/{kind}` | Remove it and fall back to the platform adapter | admin |
+| POST | `/api/v1/integrations/{kind}/test` | Probe the provider with one real vendor call | admin |
+| POST | `/api/v1/integrations` | Legacy shape kept for existing clients | admin |
 | POST | `/api/v1/invoices/{invoice_id}/approve` | Human approval of a matched invoice | orders |
 | POST | `/api/v1/invoices/{invoice_id}/match` | Re-run the three-way match | orders |
 | POST | `/api/v1/invoices/{invoice_id}/payment-posting` | Draft the AP settlement for a recorded payment | accounting |

@@ -499,3 +499,31 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     `Settings` field is undocumented, when `deploy/.env.example` declares a variable nothing reads, or
     when the template ships something that looks like a live credential. Adding a setting now requires
     documenting it in the same commit.
+114. **Provider credentials live in the tenant's database, not in the process environment.** A new
+    `integration_config` table (migration `0017_tenant_integrations`) holds one row per
+    tenant × kind; secrets inside it are encrypted with the project's existing `EncryptedString`
+    column, so a database dump never yields a plaintext token. The environment is still the bootstrap
+    for the *platform's* own adapters (`LLM_PROVIDER`, `WHATSAPP_FROM`, …), but a tenant that saves
+    credentials on the Integrations screen no longer needs a deployment change to go live.
+115. **Resolution is tenant → legacy row → platform, in that order, and it is visible.**
+    `services/integrations.configured()` only returns an integration when it is complete *and*
+    enabled; `adapter_for()` then builds the real adapter, so a half-saved configuration can never
+    silently fall through to a fake. `/integrations` reports both `provider_source`
+    (`tenant` | `legacy` | `platform`) and `platform_provider`, which is how the UI can say "your key
+    is in charge" instead of guessing. Disabling a row removes it from that precedence chain, which is
+    exactly how "disable restores the safe mode" is implemented rather than special-cased.
+116. **Partial credentials are an error state, not a sandbox state.** `snapshot()` recomputes `missing`
+    from the catalogue on every read and reports `error` with the missing field names (and the
+    vendor's `last_error` when a probe failed). The alternative — showing `Sandbox` for a save that
+    cannot possibly work — is the failure mode this whole screen exists to remove.
+117. **Secrets are write-only.** The API returns `secrets_saved` (the names) and `masked` (`••••` +
+    the last four characters) and never the value; saving again without touching a field keeps the
+    stored secret instead of blanking it, and `secrets_changed` tells the UI whether to say
+    "updated". Every save, enable, disable and delete writes an audit entry with the field names (not
+    the values), so a credential rotation is attributable after the fact.
+118. **The vendor-side proof is a real socket, and it starts from the screen.** The integration tests
+    and `scripts/e2e_journeys.py` start HTTP servers that speak the Twilio, Meta Cloud API, SerpAPI,
+    Anthropic and OpenAI wire formats, and the e2e run keeps the *platform* on `fake` with no vendor
+    secret in the environment. Any `live` status or vendor call in that run therefore has exactly one
+    possible origin: the credentials PUT through `/integrations/{kind}`. A probe that only checks
+    "the fields are non-empty" would have passed while the product was broken.
