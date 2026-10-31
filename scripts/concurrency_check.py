@@ -20,6 +20,10 @@ there:
     DATABASE_URL=postgresql+asyncpg://... SECRET_KEY=... \
         python scripts/concurrency_check.py --base-url http://localhost:8000
 
+Scenario B posts a journal entry, so the server under test must run with ``ACCOUNTING_ENABLED=true``;
+a pilot build hides the accounting module and the endpoint would answer 404 (CI sets the switch for
+this step explicitly, it does not skip the check).
+
 Exit code 0 means every invariant held.
 """
 from __future__ import annotations

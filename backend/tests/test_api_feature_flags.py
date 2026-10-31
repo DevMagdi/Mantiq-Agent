@@ -123,3 +123,30 @@ async def test_the_deployment_switch_wins_over_the_tenant_flag(client, admin, mo
     assert row["enabled"] is False
     assert row["global_allowed"] is False
     assert row["reason"] == "disabled_by_operator"
+
+
+# ------------------------------------------------------------------ pilot defaults
+def test_accounting_is_off_by_default():
+    """Accounting is a deployment switch a pilot leaves off.
+
+    Asserted from the declared defaults, independent of this suite's own environment overrides.
+    """
+    from app.core.config import Settings
+
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+    assert defaults["accounting_enabled"] is False, "accounting is hidden for the pilot by default"
+    assert defaults["whatsapp_enabled"] is True, "WhatsApp is the primary pilot channel and stays on"
+
+
+def test_the_pilot_ships_the_ai_voice_surfaces_off():
+    """A fresh deployment must not offer live-sounding AI voice it cannot deliver.
+
+    The pilot plays a scripted transcript — there is no live audio path — so both voice switches
+    default to false at the deployment layer. Turning them on is an operator decision, and nothing
+    was deleted: the flags, the endpoints and the tests are all still here.
+    """
+    from app.core.config import Settings
+
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+    assert defaults["voice_ai_enabled"] is False
+    assert defaults["voice_assistant_enabled"] is False

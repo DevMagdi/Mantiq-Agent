@@ -17,9 +17,12 @@ docs/      Architecture, decisions, traceability, security, runbook, API, design
 
 ## What it does
 
-1. **Intake** — a buyer writes "need 30 t rebar 16 mm at 20,500 EGP/t"; text, Excel, e-mail, WhatsApp
-   and voice notes are all accepted. The agent asks the clarification questions that make the need
-   quotable, then normalises lines against UNSPSC.
+1. **Intake** — a buyer writes "need 30 t rebar 16 mm at 20,500 EGP/t"; text, Excel and e-mail are
+   accepted, and so is WhatsApp: a message from an active colleague's registered phone number (or a
+   voice note on that number) becomes a purchase request through the same intake service, answered on
+   WhatsApp with the request code or the clarification question. A supplier's message takes the quote
+   path instead. The agent asks the clarification questions that make the need quotable, then
+   normalises lines against UNSPSC.
 2. **Source** — an RFQ is drafted from the requisition and dispatched to a shortlist over e-mail,
    WhatsApp, an AI voice call (disclosure first, consent-gated recording) or a no-login web form.
 3. **Extract** — supplier replies are parsed into offers with per-field provenance and confidence;
@@ -95,7 +98,12 @@ missing variables — the platform never quietly runs a demo adapter. See `docs/
 * Supplier content is fenced and treated as data; a 40-payload injection corpus runs in CI.
 * Negotiation output is checked against walk-away, round caps, concessions, opt-in and competitor
   confidentiality before it can be sent.
-* AI voice calls state that they are AI first and record only with consent.
+* AI voice calls state that they are AI first and record only with consent. In this pilot build the
+  call is a scripted transcript: no live AI audio is placed, and nothing is dialled without an
+  operator opting in (both AI-voice switches ship off).
+* Vendors are wired, not witnessed: the Meta WhatsApp, Twilio and e-mail adapters were exercised
+  against local servers that speak the documented payloads, never against the vendors' live APIs.
+  Treat the first real call to each vendor as an integration test with a human watching.
 * Supplier PII is envelope-encrypted per tenant; logs never contain secrets or full contacts.
 
 ## License

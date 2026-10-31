@@ -47,7 +47,10 @@ from fastapi.responses import JSONResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
-DEMO_PASSWORD = "Demo!Pilot2026"
+#: The harness seeds its own throwaway tenant, so it must not use the password the demo dataset ships
+#: with: a staging deployment refuses to start while BOOTSTRAP_DEMO_PASSWORD is the public default
+#: (docs/DECISIONS.md 128). This value exists only inside this script.
+DEMO_PASSWORD = "E2E!Pilot-9c3f#harness"
 TWILIO_SID = "ACe2e0000000000000000000000000001"
 TWILIO_TOKEN = "e2e-auth-token"
 TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"
@@ -626,6 +629,9 @@ async def run(args: argparse.Namespace) -> None:
         "BOOTSTRAP_ON_START": "false",
         "RATE_LIMIT_ENABLED": "false",
         "APP_ENV": "dev",
+        # Seeded accounts get this password, and the staging replicas below boot with the same setting,
+        # so neither the seed nor the boot relies on the public demo default.
+        "BOOTSTRAP_DEMO_PASSWORD": DEMO_PASSWORD,
     })
     if base_env["ALLOW_SQLITE_FALLBACK"] == "true":
         base_env["TENANT_RLS_ENABLED"] = "false"

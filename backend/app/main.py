@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api.router import api_router
+from app.api.router import build_api_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.errors import RateLimited, install_error_handlers
@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI):
     # missing Twilio/LLM/SMTP credential stops the boot with an actionable message instead of
     # silently falling back to a fake that would never contact a supplier.
     assert_ready(settings)
+    # A real deployment holding the public demo password is a published login; refuse to serve it.
+    settings.assert_demo_credentials_are_safe()
     from app.core.providers import warnings as provider_warnings
 
     for warning in provider_warnings(settings):
@@ -100,30 +102,75 @@ async def lifespan(app: FastAPI):
     log.info("shutdown complete")
 
 
-app = FastAPI(
-    title="ProcureAI API",
-    version="1.0.0",
-    description=(
-        "AI procurement agent platform by Mantiq Technologies. The system never commits the buyer "
-        "to a purchase without explicit human approval."
-    ),
-    lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
-)
+def create_app(*, accounting_enabled: bool | None = None) -> FastAPI:
+    """Build the application.
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["x-request-id"],
-)
+    ``accounting_enabled`` defaults to the deployment setting and is resolved **before** the router is
+    assembled, so a pilot build has no accounting route and no accounting path in the OpenAPI schema.
+    Tests build an isolated instance to prove exactly that.
+    """
+    application = FastAPI(
+        title="ProcureAI API",
+        version="1.0.0",
+        description=(
+            "AI procurement agent platform by Mantiq Technologies. The system never commits the buyer "
+            "to a purchase without explicit human approval."
+        ),
+        lifespan=lifespan,
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["x-request-id"],
+    )
+    application.middleware("http")(request_context)
+    install_error_handlers(application)
+    application.include_router(build_api_router(accounting_enabled=accounting_enabled),
+                               prefix=settings.api_prefix)
+    application.include_router(ws_router)
+    _install_system_routes(application)
+    return application
 
 
-@app.middleware("http")
+def _install_system_routes(application: FastAPI) -> None:
+    @application.get("/health", tags=["system"], summary="Liveness probe")
+    async def health():
+        return {"status": "ok", "app": settings.app_name, "env": settings.app_env, "version": "1.0.0"}
+
+    @application.get("/ready", tags=["system"], summary="Readiness probe (checks the database)")
+    async def ready():
+        try:
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            database = "ok"
+        except Exception as exc:  # pragma: no cover
+            log.warning("readiness failed: %s", exc)
+            database = "unavailable"
+        status = "ready" if database == "ok" else "degraded"
+        return JSONResponse({"status": status, "database": database, "adapters": {
+            "llm": settings.llm_provider, "email": settings.email_provider,
+            "search": settings.search_provider,
+        }}, status_code=200 if status == "ready" else 503)
+
+    @application.get("/metrics", tags=["system"], summary="Prometheus-format metrics (minimal)")
+    async def metrics():
+        from app.api.ws import hub
+
+        body = (
+            "# HELP procureai_up Service liveness\n# TYPE procureai_up gauge\nprocureai_up 1\n"
+            "# HELP procureai_ws_connections Active websocket connections\n"
+            "# TYPE procureai_ws_connections gauge\n"
+            f"procureai_ws_connections {hub.connection_count()}\n"
+        )
+        return Response(body, media_type="text/plain; version=0.0.4")
+
+
 async def request_context(request: Request, call_next):  # noqa: ANN001
     request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex[:16]}"
     request.state.request_id = request_id
@@ -162,39 +209,4 @@ async def request_context(request: Request, call_next):  # noqa: ANN001
     return response
 
 
-install_error_handlers(app)
-app.include_router(api_router, prefix=settings.api_prefix)
-app.include_router(ws_router)
-
-
-@app.get("/health", tags=["system"], summary="Liveness probe")
-async def health():
-    return {"status": "ok", "app": settings.app_name, "env": settings.app_env, "version": "1.0.0"}
-
-
-@app.get("/ready", tags=["system"], summary="Readiness probe (checks the database)")
-async def ready():
-    try:
-        async with SessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-        database = "ok"
-    except Exception as exc:  # pragma: no cover
-        log.warning("readiness failed: %s", exc)
-        database = "unavailable"
-    status = "ready" if database == "ok" else "degraded"
-    return JSONResponse({"status": status, "database": database, "adapters": {
-        "llm": settings.llm_provider, "email": settings.email_provider, "search": settings.search_provider,
-    }}, status_code=200 if status == "ready" else 503)
-
-
-@app.get("/metrics", tags=["system"], summary="Prometheus-format metrics (minimal)")
-async def metrics():
-    from app.api.ws import hub
-
-    body = (
-        "# HELP procureai_up Service liveness\n# TYPE procureai_up gauge\nprocureai_up 1\n"
-        "# HELP procureai_ws_connections Active websocket connections\n"
-        "# TYPE procureai_ws_connections gauge\n"
-        f"procureai_ws_connections {hub.connection_count()}\n"
-    )
-    return Response(body, media_type="text/plain; version=0.0.4")
+app = create_app()

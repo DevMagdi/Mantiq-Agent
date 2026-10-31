@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit
+from app.core.config import settings
 from app.db.models.entities import GoodsReceipt, PurchaseOrder, Supplier, Tenant, User
 from app.services import numbers, p2p
 from app.services.common import lock_for_update, next_code, notify, notify_role
@@ -275,9 +276,13 @@ async def confirm_receipt(session: AsyncSession, tenant: Tenant, receipt: GoodsR
                      title=f"{receipt.code} rejected by the requester",
                      title_ar=f"تم رفض استلام {receipt.code} من طالب الشراء",
                      body=comment[:300], link=href, severity="warning")
-    if decision == "confirm":
+    if decision == "confirm" and settings.accounting_enabled:
         # The auditor's package is assembled automatically the moment the need is confirmed: the
         # evidence is complete at that point, and nothing in the bundle is created by a model.
+        #
+        # With accounting switched off the package is deliberately *not* assembled: its purpose is to
+        # gate the invoice into accounting, and both the review route and the journal it lists would
+        # be 404 — a bundle nobody can review, and a PO parked at "ready for audit" forever.
         from app.services import audit_package  # local import: audit_package imports this module
 
         try:

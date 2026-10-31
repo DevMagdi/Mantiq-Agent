@@ -137,8 +137,11 @@ the Celery workers are not executed here; their code paths run eagerly in the te
 2. `app/agents/llm/providers.py` is now exercised over a real socket (success, retry, 4xx, transport
    failure) but still not against a vendor's live endpoint; a live smoke test needs `LLM_API_KEY`.
 3. The WebSocket hub has no back-pressure: a slow client is dropped after the first failed send.
-4. Arabic PDF rendering of purchase orders uses the Latin font stack; Arabic strings render but not
-   with the display face. Requires an embedded Arabic font subset.
+4. Arabic PDF rendering of purchase orders now embeds Noto Naskh Arabic and shapes it through
+   HarfBuzz, with the runs of a mixed line ordered right-to-left (`app/services/pdf_fonts.py`). What
+   is *not* proven here: this sandbox has no PDF rasteriser, so the page has never been rendered to
+   pixels — `tests/test_services_po_pdf.py` asserts the embedded face, the shaped drawing operators
+   and the run order, and a human opens the sample PDF in `docs/RUNBOOK.md` before a pilot mails one.
 5. Frontend bundle: 400 kB (108 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
    chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
    the post-award screens ship in the main chunk.

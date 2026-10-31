@@ -527,3 +527,88 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     secret in the environment. Any `live` status or vendor call in that run therefore has exactly one
     possible origin: the credentials PUT through `/integrations/{kind}`. A probe that only checks
     "the fields are non-empty" would have passed while the product was broken.
+119. **Accounting is a deployment switch, not a tenant flag.** The pilot must not show a trace of it,
+    so `ACCOUNTING_ENABLED` lives in `Settings` and is resolved when the router is assembled:
+    `build_api_router(accounting_enabled=…)` simply does not include the accounting router, which is
+    why the paths are absent from `/api/openapi.json` (verified in
+    `tests/test_accounting_hidden.py`) rather than answering a 403 or a `BLOCK_FEATURE_OFF` that
+    would advertise the module. A tenant administrator therefore cannot discover — let alone
+    enable — it. The two supplier-ledger routes and the P2P lifecycle route moved out of `orders.py`
+    into the accounting module for the same reason: leaving them behind would have kept four paths
+    in the schema that only the accounting module can answer.
+120. **The hidden module loses its permissions, not its matrix.** `core.rbac.visible_permissions()`
+    removes `accounting:*`, `cost:*`, `ledger:read` and `audit_package:*` from the effective set at
+    the one place `Context` is built, so `/auth/me`, the sidebar, every `require()` and every
+    capability-driven card agree without a second source of truth. The RBAC matrix itself is
+    untouched — flipping the switch restores the same roles.
+121. **The auditor package is not assembled when accounting is off.** `receiving.confirm` used to seal
+    a package on every delivery confirmation. Its purpose is to gate the invoice into accounting, and
+    with the module off both the review route and the journal it lists are 404 — a bundle nobody can
+    review and a PO parked at "ready for audit" forever. So the call is skipped, the receipt and the
+    confirmation are unaffected, and the P2P rail (`p2p.stages()`) ends at "confirmed by requester".
+    Recorded stage rows are never rewritten, so the history of a tenant that later enables accounting
+    is intact.
+122. **The pilot ships the AI-voice surfaces off.** `VOICE_AI_ENABLED` and `VOICE_ASSISTANT_ENABLED`
+    default to `false` because the pilot plays a scripted transcript — there is no live audio path in
+    the product today. Nothing was removed: the endpoints, the flags and their tests still exist, and
+    an operator can turn them on; `tests/test_api_feature_flags.py` pins the shipped defaults so the
+    claim in `docs/PROGRESS.md` cannot drift.
+
+123. **The webhook resolves tenancy from the payload, never from a default tenant.** Meta cannot send
+    custom headers, so `x-tenant-slug` defaulting to `nile` meant every WhatsApp webhook landed on the
+    demo tenant. The tenant is now the one that registered the `phone_number_id` on the Integrations
+    screen — the same id the Cloud adapter already sends from. An unregistered number is answered
+    `200 {processed: 0}` (so Meta stops retrying a delivery nothing can accept), logged once, and
+    recorded as `channel.unknown_recipient`; it is never guessed from a header. The header survives
+    only as an explicit fallback for Twilio and local development, and strict deployments ignore the
+    implicit default.
+124. **A signature rejection is a recorded event, not a silent 401.** The response stays opaque
+    (`{"error":"invalid signature"}`), but one log line names the reason (`missing_app_secret` versus
+    `bad_signature`) and an audit row is written — without the secret and without the body. A strict
+    deployment with `WHATSAPP_PROVIDER=cloud_api` now refuses to boot without `WHATSAPP_APP_SECRET`,
+    because a Cloud deployment that cannot verify a single delivery is broken, not degraded.
+125. **A colleague's message becomes a purchase request; a supplier's reply stays a quote.** The
+    inbound router decides in this order: an active user whose profile phone matches *and* who is not
+    currently invited on an open RFQ → `intake.intake_free_text` (the same service `/intake/text`
+    uses), audited as `intake.whatsapp`, answered on WhatsApp with the code or the open clarification
+    question; otherwise a supplier with an open invitation → the existing extraction pipeline;
+    otherwise an unmatched event. The open invitation is the tiebreaker, because a supplier can also
+    be a colleague and the paperwork — not the phone book — says which conversation this is.
+126. **Numbers are normalised once, in one helper.** `services/phone.normalise` resolves the Egyptian
+    local form (`01xxxxxxxxx`), E.164 (`+201…`), bare international (`201…`) and the `00` prefix to
+    country code + national digits, so a phone typed by a human and a `wa_id` emitted by Meta compare
+    equal. It is used for user matching and for supplier matching alike.
+127. **The call screens say what the pilot actually does.** Both AI-voice switches already default to
+    false, but the wording still promised live AI speech ("Start an AI call", "the AI disclosure is the
+    first thing the supplier hears"). The pilot places no live audio: the call is a scripted transcript
+    whose disclosure, turns and refusals are real records. The screen now carries one line saying so
+    (Arabic first, English second), and the action reads "Start a call" / "بدء مكالمة". Nothing was
+    deleted — the buttons, the endpoints and their request shapes are untouched, so an operator who
+    turns the flags on gets exactly the phase-3 behaviour with honest labels.
+128. **Demo data and the public demo password are refused outside dev.** `bootstrap --demo` and
+    `seed-demo` are how a laptop gets a populated product; in staging or production they are a
+    tenant full of accounts whose password is printed in the README. Both commands now refuse there
+    (production already did; staging did not), and a strict deployment refuses to *start* while
+    `BOOTSTRAP_DEMO_PASSWORD` is still the shipped default. Dev and test keep the one-command demo
+    flow untouched, and `ALLOW_FAKE_PROVIDERS` does not excuse a published password — it excuses fake
+    adapters, nothing else.
+129. **The README describes what was tested, not what was wired.** The WhatsApp intake sentence claimed
+    a channel that silently discarded every real delivery (fixed above) and listed AI voice calls with
+    no mention that the pilot places none. The README now names the actual intake behaviour and adds
+    one line about vendors being verified against local servers that speak the documented payloads,
+    never against live APIs. This matters more than any feature: a reader makes deployment decisions
+    from the README, and the first real vendor call is an integration test with a human watching.
+130. **Arabic in the PO PDF: one bundled font, HarfBuzz shaping, and a run-splitting pass instead of a
+    bidi dependency.** ReportLab draws a TrueType font happily and still produces unreadable Arabic,
+    because it draws stored characters: the letters stay disconnected and the line stays in logical
+    order. The fix has three parts. (1) The font travels with the code — Noto Naskh Arabic Regular and
+    Bold plus its OFL-1.1 licence under `app/assets/fonts/`, declared as package data, so a PO opens
+    correctly on a machine that has never installed an Arabic font. (2) Shaping — the faces are
+    registered as *shapable* and strings are passed through `ttfonts.shapeStr`, which shapes with
+    HarfBuzz (`uharfbuzz`, Apache-2.0, now a declared dependency; approved before it was added).
+    (3) Ordering — Arabic and ASCII runs are drawn separately, because one HarfBuzz buffer has one
+    direction and a mixed run reverses the ASCII with the Arabic (the classic mirrored price). The run
+    splitter in `pdf_fonts.display_runs` is the subset of the bidi algorithm a document line needs: the
+    paragraph direction comes from the first strong character, neutral characters stay with the run
+    they follow, and the runs are emitted in visual order. That avoided `python-bidi`/`arabic-reshaper`,
+    which would have been two more dependencies to vet and would still have needed the same font.

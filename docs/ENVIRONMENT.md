@@ -127,7 +127,9 @@ or `response_format=json_object` (OpenAI) and validate the answer against the ta
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `WHATSAPP_ENABLED`, `VOICE_AI_ENABLED`, `VOICE_ASSISTANT_ENABLED` | `true` | Deployment-level feature switches; tenant flags can only narrow them. |
+| `WHATSAPP_ENABLED` | `true` | Deployment-level feature switch; tenant flags can only narrow it. |
+| `VOICE_AI_ENABLED`, `VOICE_ASSISTANT_ENABLED` | `false` | Pilot default. The AI-voice surfaces play a scripted, pre-recorded transcript — there is no live audio — so they ship switched off; a tenant flag cannot turn them on against the operator. Set to `true` to restore the phase-3 behaviour. |
+| `ACCOUNTING_ENABLED` | `false` | Pilot default. **Deployment-level only, never a tenant toggle**: when `false` the accounting router is not mounted (so `/api/v1/accounting/*`, `/supplier-balances`, `/purchase-orders/{id}/accounting|audit-package|lifecycle` are absent from the API and from `/api/openapi.json`), the accounting permissions are stripped from every caller, no journal is drafted on receipt/invoice/payment, no account or cost centre is seeded, and the auditor package is not assembled. The code, the tables and the migrations are kept: setting it to `true` restores phase-2 behaviour exactly. |
 | `RATE_LIMIT_ENABLED` | `true` | 240 req/min per user, 600 anonymous, login 10/account + 120/IP. |
 | `CONTACT_HOURS_START` / `CONTACT_HOURS_END` | `7` / `21` | Local hour window in which suppliers may be contacted. |
 | `DEMO_SEED_ON_START`, `BOOTSTRAP_ON_START` | `true` | Demo data and automatic migrations at boot. Set both to `false` in production and run `procureai bootstrap` explicitly. |

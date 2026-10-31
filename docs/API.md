@@ -147,6 +147,14 @@ The accounting module is the only place where a purchase becomes a number. Every
 permission-gated (`accounting:read|write|post|reverse`, `cost:read|write`, `audit_package:read|review`)
 and **no endpoint moves money**: `payment_method` on an invoice is a *suggestion*, not an execution.
 
+> **Optional module.** With `ACCOUNTING_ENABLED=false` (the pilot default) this whole section does not
+> exist: the router is not mounted, so every path below answers the app's ordinary `404` — byte-for-byte
+> the same body an unknown URL returns — and none of them appears in `/api/openapi.json`. The
+> accounting permissions are also stripped from `/auth/me`. The two supplier-ledger routes
+> (`/supplier-balances`, `/suppliers/{id}/balance`) and `/purchase-orders/{id}/lifecycle` moved into
+> this module for exactly that reason. Nothing is deleted: set the variable to `true` and the surface
+> returns unchanged.
+
 ```bash
 # 0. the eleven-stage rail and its written history
 GET  /api/v1/purchase-orders/{po_id}/lifecycle
@@ -264,9 +272,27 @@ back to reply buttons otherwise.
 
 **Webhook.** `GET /api/v1/inbound/{channel}` answers Meta's verification handshake (echoes
 `hub.challenge` when `hub.verify_token` matches `WHATSAPP_VERIFY_TOKEN`). `POST /api/v1/inbound/whatsapp`
-verifies `X-Hub-Signature-256` in `cloud_api` mode, then processes, in this order: delivery receipts →
-consent events (`STOP` / `START`) → messages (media downloaded and transcribed/extracted) → the shared
-extraction pipeline. The tenant is chosen with the `x-tenant-slug` header (default `nile`).
+verifies `X-Hub-Signature-256` in `cloud_api` mode — a mismatch is `401 {"error":"invalid signature"}`,
+one log line names the reason (`missing_app_secret` / `bad_signature`, never the secret or the body) and
+`channel.signature_rejected` is audited — then processes, in this order: delivery receipts → consent
+events (`STOP` / `START`) → messages (media downloaded and transcribed) → routing.
+
+**Which tenant a delivery belongs to.** Meta cannot send custom headers, so the tenant is the one that
+registered the payload's `metadata.phone_number_id` on the Integrations screen
+(`integration_config` of kind `whatsapp`, `config.phone_number_id`). An id no tenant registered is
+answered `200 {"processed": 0, "reason": "unknown_phone_number_id"}` — success, so Meta stops retrying a
+delivery nothing can accept — with one warning log and a `channel.unknown_recipient` audit row that
+records the id and nothing else. `x-tenant-slug` survives only as an explicit fallback for Twilio and for
+local development; strict deployments (`APP_ENV=prod|production|staging` without
+`ALLOW_FAKE_PROVIDERS`) ignore the implicit `nile` default entirely.
+
+**What a message becomes.** After the consent and status paths: an *open RFQ invitation* for the sender
+wins first (a supplier's reply is extracted exactly as before); otherwise an active user whose profile
+phone matches the sender becomes the author of a purchase request through the same service
+`POST /intake/text` uses, audited `intake.whatsapp`, and receives one WhatsApp reply carrying the request
+code or the open clarification question; otherwise the message is recorded as `received_unmatched`,
+nothing is created and nothing is sent. Phone numbers are normalised by `services/phone.py`
+(`01xxxxxxxxx`, `+201xxxxxxxxx`, `201xxxxxxxxx` and the `00` form are the same number).
 
 **Twilio webhooks.** With `WHATSAPP_PROVIDER=twilio` (or `SMS_PROVIDER=twilio`) the same routes accept
 Twilio's `application/x-www-form-urlencoded` callback and verify `X-Twilio-Signature`

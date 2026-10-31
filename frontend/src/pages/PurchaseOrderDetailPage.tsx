@@ -73,10 +73,14 @@ export default function PurchaseOrderDetailPage() {
     enabled: Boolean(id),
   });
 
+  // The lifecycle rail is part of the accounting module (its last two stages are "ready for audit"
+  // and "posted to accounts"), so it is only fetched when the deployment serves that module. With
+  // ACCOUNTING_ENABLED=false the route is a 404 and the page falls back to the plain delivery stepper.
+  const accounting = can(PERM.accountingRead);
   const lifecycleQuery = useQuery({
     queryKey: ["lifecycle", id],
     queryFn: () => api.get<Lifecycle>(`/api/v1/purchase-orders/${id}/lifecycle`),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && accounting,
   });
 
   const invalidate = async () => {
@@ -319,7 +323,7 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         <div className="space-y-4">
-          {po.supplier_balance ? (
+          {accounting && po.supplier_balance ? (
           <Card>
             <CardHeader title={t("purchaseOrders.balance.title")} subtitle={t("purchaseOrders.balance.derived")} />
             <div className="grid grid-cols-2 gap-3 p-4">
@@ -356,9 +360,9 @@ export default function PurchaseOrderDetailPage() {
           </Card>
           ) : null}
 
-          <PostingsCard po={po} onChanged={invalidate} />
+          {accounting ? <PostingsCard po={po} onChanged={invalidate} /> : null}
 
-          <AuditPackageCard poId={po.id} onChanged={invalidate} />
+          {accounting ? <AuditPackageCard poId={po.id} onChanged={invalidate} /> : null}
 
           <Card>
             <CardHeader title={t("purchaseOrders.lifecycle")} />

@@ -592,11 +592,18 @@ async def inbound(channel: str, request: Request):
 
     WhatsApp goes through the phase-3 channel service, which handles delivery receipts, consent
     keywords and media downloads *before* the shared extraction pipeline sees the text.
+
+    **Tenant resolution.** Meta cannot send a custom header, so the tenant is resolved from the
+    `phone_number_id` in the payload — the number the operator registered on the Integrations screen.
+    An unknown number is answered `200 {processed: 0}` (so Meta stops retrying), logged once and
+    recorded, never guessed. `x-tenant-slug` remains an explicit fallback for Twilio, for tests and
+    for local development, and it is ignored in strict environments.
     """
     from urllib.parse import parse_qs
 
     from app.adapters.twilio import TwilioSmsProvider, TwilioWhatsAppProvider
     from app.adapters.whatsapp import CloudWhatsAppProvider
+    from app.core.audit import audit as audit_event
     from app.core.config import settings
     from app.db.session import SessionLocal
     from app.services import integrations as integration_adapters
@@ -604,11 +611,47 @@ async def inbound(channel: str, request: Request):
 
     body = await request.body()
     async with SessionLocal() as session:
-        tenant = (await session.execute(
-            select(Tenant).where(Tenant.slug == request.headers.get("x-tenant-slug", "nile"))
-        )).scalar_one_or_none()
-        if not tenant:
-            raise NotFound("Tenant not found.")
+        # Parse the body once: Meta's payload decides the tenant, Twilio's form decides the signature.
+        try:
+            json_payload = await request.json() if body else {}
+        except Exception:  # noqa: BLE001 - a form payload is not JSON
+            json_payload = {}
+        form_payload: dict[str, str] | None = None
+        if channel not in {"whatsapp", "sms"} or (
+            not whatsapp_channel.phone_number_id(json_payload)
+            and "application/x-www-form-urlencoded" in request.headers.get("content-type", "")
+        ):
+            form_payload = {key: values[-1] for key, values in
+                            parse_qs(body.decode(errors="replace"), keep_blank_values=True).items()}
+
+        payload = form_payload if form_payload is not None else json_payload
+        number_id = whatsapp_channel.phone_number_id(payload) if channel == "whatsapp" else ""
+        header_slug = request.headers.get("x-tenant-slug", "")
+
+        tenant = None
+        if number_id:
+            tenant = await whatsapp_channel.tenant_for_phone_number_id(session, number_id)
+            if tenant is None:
+                # Nothing belongs to this number. Answer 200 so Meta does not retry forever, log the
+                # id (never a token or a body), and leave a trail an operator can find.
+                log.warning("whatsapp webhook from unregistered phone_number_id=%s", number_id)
+                await audit_event(session, tenant_id=None, action="channel.unknown_recipient",
+                                  actor_type="supplier", actor_label="whatsapp:webhook",
+                                  entity_type="integration_config",
+                                  after={"channel": channel, "phone_number_id": number_id,
+                                         "reason": "unknown_phone_number_id"})
+                await session.commit()
+                return {"processed": 0, "statuses": [], "results": [],
+                        "reason": "unknown_phone_number_id"}
+        if tenant is None:
+            slug = header_slug or ("" if settings.strict_providers else "nile")
+            if not slug:
+                # Strict deployment, non-Meta provider and no explicit tenant header: refuse rather
+                # than fall back to a demo tenant that may not even exist.
+                raise NotFound("Tenant not found.")
+            tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
+            if not tenant:
+                raise NotFound("Tenant not found.")
 
         # The provider is resolved *for this tenant*: a signature must be checked with the credentials
         # that tenant saved on the Integrations screen, not with whatever the platform default is.
@@ -616,21 +659,30 @@ async def inbound(channel: str, request: Request):
         if channel in {"whatsapp", "sms"}:
             provider = await integration_adapters.adapter_for(session, tenant, channel)
 
-        form_payload: dict[str, str] | None = None
         if channel == "whatsapp" and isinstance(provider, CloudWhatsAppProvider):
             signature = request.headers.get("x-hub-signature-256", "")
             if not provider.verify_webhook(body, signature):
+                # One line, the reason, never the secret and never the body.
+                reason = "missing_app_secret" if not provider.app_secret else "bad_signature"
+                log.warning("whatsapp webhook signature rejected tenant=%s reason=%s", tenant.slug, reason)
+                await audit_event(session, tenant_id=tenant.id, action="channel.signature_rejected",
+                                  actor_type="system", actor_label="whatsapp:webhook",
+                                  entity_type="tenant", entity_id=tenant.id,
+                                  after={"channel": channel, "reason": reason})
+                await session.commit()
                 return Response(status_code=401, content='{"error":"invalid signature"}')
         elif isinstance(provider, (TwilioWhatsAppProvider, TwilioSmsProvider)):
             # Twilio posts application/x-www-form-urlencoded and signs `url + sorted(params)`.
             signature = request.headers.get("x-twilio-signature", "")
             callback_url = settings.twilio_webhook_url or str(request.url)
             if not provider.verify_webhook(body, signature, callback_url):
+                log.warning("twilio webhook signature rejected tenant=%s", tenant.slug)
                 return Response(status_code=401, content='{"error":"invalid signature"}')
-            form_payload = {key: values[-1] for key, values in
-                            parse_qs(body.decode(), keep_blank_values=True).items()}
+            if form_payload is None:
+                form_payload = {key: values[-1] for key, values in
+                                parse_qs(body.decode(errors="replace"), keep_blank_values=True).items()}
+            payload = form_payload
 
-        payload = form_payload if form_payload is not None else await request.json()
         if channel == "whatsapp":
             handled = await whatsapp_channel.handle_webhook(session, tenant, payload)
             await session.commit()

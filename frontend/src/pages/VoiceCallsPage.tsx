@@ -84,6 +84,11 @@ export default function VoiceCallsPage() {
     <div className="space-y-4">
       <PageHeading eyebrow={t("voice.eyebrow")} title={t("voice.title")} subtitle={t("voice.subtitle")} />
 
+      {/* The call is a scripted transcript in this build; saying so is the honest thing to do. */}
+      <p className="rounded-md border border-line bg-surface-sunken px-3 py-2 text-xs text-ink-muted" role="note">
+        {t("voice.pilotNotice")}
+      </p>
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-4 md:col-span-2">
           <CardHeader title={t("voice.startCall")} subtitle={t("voice.startCallHint")} />

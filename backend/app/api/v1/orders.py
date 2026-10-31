@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
@@ -413,27 +412,6 @@ async def record_payment(invoice_id: str, payload: PaymentIn, ctx: Context = Dep
                 ip=ctx.ip, request_id=ctx.request_id)
     await ctx.session.commit()
     return result
-
-
-# ------------------------------------------------------------------ supplier ledger
-@router.get("/supplier-balances", summary="Outstanding balance per supplier")
-async def supplier_balances(ctx: Context = Depends(require("ledger:read"))):
-    rows = await invoicing.supplier_balances(ctx.session, ctx.tenant)
-    outstanding = sum((Decimal(row["outstanding"]) for row in rows), Decimal("0"))
-    overdue = sum((Decimal(row["overdue"]) for row in rows), Decimal("0"))
-    return {"items": rows, "total_outstanding": str(numbers.money(outstanding)),
-            "total_overdue": str(numbers.money(overdue)), "currency": ctx.tenant.currency}
-
-
-@router.get("/suppliers/{supplier_id}/balance", summary="Ledger and balance for one supplier")
-async def supplier_balance(supplier_id: str, ctx: Context = Depends(require("ledger:read"))):
-    supplier = (await ctx.session.execute(
-        select(Supplier).where(Supplier.id == supplier_id, Supplier.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
-    if not supplier:
-        raise NotFound("Supplier not found.")
-    balance = await invoicing.supplier_balance(ctx.session, ctx.tenant_id, supplier.id)
-    return {**balance, "supplier_name": supplier.name, "supplier_name_ar": supplier.name_ar}
 
 
 # ------------------------------------------------------------------ documents (moved from rfq)

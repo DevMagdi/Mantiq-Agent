@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -84,8 +85,11 @@ class Settings(BaseSettings):
     # Phase 3 channel + AI-voice master switches. Both layers must agree: this global switch AND
     # the tenant feature flag (tenant.settings["features"]) before a channel or AI feature is used.
     whatsapp_enabled: bool = True
-    voice_ai_enabled: bool = True
-    voice_assistant_enabled: bool = True
+    # Pilot defaults: the AI-voice surfaces play a scripted, pre-recorded transcript (there is no live
+    # audio in the pilot), so both are off unless an operator opts in. Nothing was deleted: setting
+    # these to true restores the phase-3 behaviour exactly.
+    voice_ai_enabled: bool = False
+    voice_assistant_enabled: bool = False
     whatsapp_daily_cap: int = 400
     whatsapp_session_window_hours: int = 24
     telephony_provider: str = "fake"  # fake | twilio
@@ -112,6 +116,13 @@ class Settings(BaseSettings):
     payment_provider: str = "fake"  # fake | stripe
     stripe_key: str = ""
     erp_provider: str = "file"  # file | odoo
+
+    # --- accounting module ---
+    # A deployment-level switch, deliberately *not* a tenant feature flag: when it is off the
+    # accounting surface does not exist at all (no router, no OpenAPI paths, no permissions, no
+    # journal side effects), and a tenant administrator has no way to discover or enable it. The
+    # code, the tables and the migrations are kept; turning this on restores phase-2 behaviour.
+    accounting_enabled: bool = False
 
     # --- security ---
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -147,6 +158,38 @@ class Settings(BaseSettings):
         if self.allow_fake_providers:
             return False
         return self.app_env.lower() in {"prod", "production", "staging"}
+
+    #: The password the demo dataset ships with. It is public (it is in the README), so its presence in
+    #: a real deployment would hand every demo account to anyone who reads the documentation.
+    DEMO_PASSWORD_DEFAULT: ClassVar[str] = "Demo!Pilot2026"
+
+    def demo_password_is_default(self) -> bool:
+        return (self.bootstrap_demo_password or "") == self.DEMO_PASSWORD_DEFAULT
+
+    def demo_refusal(self) -> str:
+        """Why demo data must not be created here, or "" when it is allowed."""
+        if self.is_prod:
+            return "refusing to create demo data in production"
+        if self.app_env.lower() == "staging":
+            return "refusing to create demo data in staging"
+        return ""
+
+    def assert_demo_credentials_are_safe(self) -> None:
+        """Fail fast when a real deployment still carries the public demo password.
+
+        A staging/production box with the shipped demo password in effect is a login that anybody who
+        read the README can use. Starting is worse than not starting, so this raises. Dev and test are
+        untouched. `ALLOW_FAKE_PROVIDERS` deliberately does not matter here: it excuses fake adapters,
+        never a published password.
+        """
+        if self.app_env.lower() not in {"prod", "production", "staging"}:
+            return
+        if self.demo_password_is_default():
+            raise RuntimeError(
+                "BOOTSTRAP_DEMO_PASSWORD is still the public demo default "
+                f"({self.DEMO_PASSWORD_DEFAULT!r}) while APP_ENV={self.app_env}. Set a real password "
+                "or remove the demo accounts before starting a real deployment."
+            )
 
     def twilio_credentials(self) -> tuple[str, str]:
         """TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN, with the legacy TELEPHONY_* names as aliases."""

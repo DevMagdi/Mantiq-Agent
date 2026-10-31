@@ -133,6 +133,12 @@ jobs:
           PY
 
       - name: Seed the demo dataset through the CLI (also proves the CLI works on PostgreSQL)
+        env:
+          # The demo chart of accounts is part of that dataset, and it is only seeded when the
+          # accounting module is on (a pilot install must not carry a chart of accounts it cannot
+          # show). The concurrency proof below posts a journal entry against those accounts, so this
+          # step opts in explicitly instead of relying on a default that no longer exists.
+          ACCOUNTING_ENABLED: "true"
         run: python -m app.cli seed-demo
 
       - name: Tenant isolation is enforced by RLS
@@ -141,6 +147,10 @@ jobs:
       - name: Concurrent double-submits cannot corrupt the books
         env:
           RATE_LIMIT_ENABLED: "false"
+          # This proof is *about* the accounting module (posting, invoice payment, approval decision),
+          # and the module ships hidden behind a deployment switch. The switch is turned on here
+          # explicitly, exactly as the accounting test modules do, rather than weakening the check.
+          ACCOUNTING_ENABLED: "true"
         run: |
           uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level warning &
           for attempt in $(seq 1 30); do
