@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from app.cli import app
@@ -135,3 +136,43 @@ def test_doctor_checks_postgres_extensions_only_when_the_url_is_postgres(monkeyp
     assert body["database"] == "postgresql+asyncpg"
     # The test database is SQLite, so the extension catalogue is unreachable — and that is reported.
     assert body["database_check"]["connectivity"].startswith("failed:")
+
+
+# ------------------------------------------------------------------ demo credentials are not a backdoor
+def test_demo_data_is_refused_in_staging_and_production(monkeypatch):
+    """`bootstrap --demo` and `seed-demo` exist for a laptop, not for a deployment."""
+    from app.core.config import settings
+
+    for env in ("staging", "production"):
+        monkeypatch.setattr(settings, "app_env", env)
+        monkeypatch.setattr(settings, "allow_fake_providers", True)  # isolate the demo rule
+        result = runner.invoke(app, ["seed-demo"])
+        assert result.exit_code == 1, result.output
+        assert "demo" in result.output.lower()
+        bootstrap = runner.invoke(app, ["bootstrap", "--demo"])
+        assert bootstrap.exit_code == 1, bootstrap.output
+        # The platform bootstrap itself is still allowed.
+        assert settings.demo_refusal(), env
+
+
+def test_a_strict_deployment_refuses_to_start_on_the_public_demo_password(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "allow_fake_providers", True)
+    monkeypatch.setattr(settings, "bootstrap_demo_password", "Demo!Pilot2026")
+    with pytest.raises(RuntimeError) as exc:
+        settings.assert_demo_credentials_are_safe()
+    assert "demo" in str(exc.value).lower()
+
+    monkeypatch.setattr(settings, "bootstrap_demo_password", "K9!vQ2#pLm7$Rt4z")
+    settings.assert_demo_credentials_are_safe()  # a real password passes
+
+
+def test_dev_keeps_the_demo_flow_untouched(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "app_env", "dev")
+    monkeypatch.setattr(settings, "bootstrap_demo_password", "Demo!Pilot2026")
+    assert settings.demo_refusal() == ""
+    settings.assert_demo_credentials_are_safe()

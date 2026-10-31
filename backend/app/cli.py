@@ -34,6 +34,11 @@ def migrate(revision: str = typer.Argument("head")):
 def bootstrap(demo: bool = typer.Option(True, help="Also create the demo customer tenant")):
     """Create the platform tenant, SuperAdmin and (optionally) the demo tenant + Admin. Idempotent."""
 
+    if demo and settings.demo_refusal():
+        typer.echo(f"{settings.demo_refusal()}: rerun with --no-demo to bootstrap only the platform.",
+                   err=True)
+        raise typer.Exit(code=1)
+
     async def _inner():
         async with SessionLocal() as session:
             report = await run_bootstrap(session, force=True, demo=demo)
@@ -45,9 +50,9 @@ def bootstrap(demo: bool = typer.Option(True, help="Also create the demo custome
 
 @app.command("seed-demo")
 def seed_demo(slug: str = typer.Option("nile", help="Tenant slug to seed")):
-    """Load the Egyptian-market demo dataset (never run in production)."""
-    if settings.is_prod:
-        typer.echo("Refusing to seed demo data in production.", err=True)
+    """Load the Egyptian-market demo dataset (never run in staging or production)."""
+    if settings.demo_refusal():
+        typer.echo(f"{settings.demo_refusal()}.", err=True)
         raise typer.Exit(code=1)
 
     async def _inner():

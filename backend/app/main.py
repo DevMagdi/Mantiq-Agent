@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI):
     # missing Twilio/LLM/SMTP credential stops the boot with an actionable message instead of
     # silently falling back to a fake that would never contact a supplier.
     assert_ready(settings)
+    # A real deployment holding the public demo password is a published login; refuse to serve it.
+    settings.assert_demo_credentials_are_safe()
     from app.core.providers import warnings as provider_warnings
 
     for warning in provider_warnings(settings):

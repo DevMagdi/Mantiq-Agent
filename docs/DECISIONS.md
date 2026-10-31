@@ -585,3 +585,10 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     (Arabic first, English second), and the action reads "Start a call" / "بدء مكالمة". Nothing was
     deleted — the buttons, the endpoints and their request shapes are untouched, so an operator who
     turns the flags on gets exactly the phase-3 behaviour with honest labels.
+128. **Demo data and the public demo password are refused outside dev.** `bootstrap --demo` and
+    `seed-demo` are how a laptop gets a populated product; in staging or production they are a
+    tenant full of accounts whose password is printed in the README. Both commands now refuse there
+    (production already did; staging did not), and a strict deployment refuses to *start* while
+    `BOOTSTRAP_DEMO_PASSWORD` is still the shipped default. Dev and test keep the one-command demo
+    flow untouched, and `ALLOW_FAKE_PROVIDERS` does not excuse a published password — it excuses fake
+    adapters, nothing else.
