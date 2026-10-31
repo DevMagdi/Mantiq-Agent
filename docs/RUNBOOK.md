@@ -179,6 +179,53 @@ version, not the block, and record the reason in the approval comment.
 AND due_at < now();` → run `POST /admin/erasure-requests/{id}/execute`, then confirm
 `privacy.erasure_executed` in `audit_log`.
 
+## 7a. Trying WhatsApp inbound locally (Meta test number, free tier)
+
+This is the shortest path from "I sent a message" to "a purchase request exists". It assumes uvicorn on
+`127.0.0.1:8000` and ngrok; nothing here needs a paid Meta plan.
+
+1. **Meta app + test number.** In the Meta developer console create (or open) an app of type
+   *Business*, add the **WhatsApp** product, and use the free **test number** it provisions. Copy the
+   *Phone number ID* — that id, not the phone number, is what the platform matches tenancy on.
+2. **Register the recipient.** Meta only delivers to numbers added under *To* (up to five on the test
+   tier): add your own phone and confirm the code you receive on WhatsApp.
+3. **Expose the API.** `ngrok http 8000` → note the `https://…ngrok-free.app` host. The webhook is
+   `https://<ngrok-host>/api/v1/inbound/whatsapp`. *(The ngrok inspector at `http://127.0.0.1:4040`
+   shows each delivery and its response — the fastest way to see why Meta gave up.)*
+4. **Save the credentials in the product.** Sign in as a tenant administrator →
+   **Settings → Integrations → WhatsApp**: provider *Meta Cloud API*, the **Phone Number ID** from
+   step 1, the **access token**, and an **app secret** and **verify token** you choose. Save, then
+   **Test connection** — a green `Live` means the platform really reached the Graph API.
+5. **Subscribe the webhook.** In the Meta console → WhatsApp → *Configuration*: callback URL from
+   step 3 (Meta calls it with `GET` and expects your **verify token** echoed back — the platform does
+   that at `GET /api/v1/inbound/whatsapp`) and subscribe to the **messages** field. Paste the same
+   verify token there.
+6. **Give a colleague a phone number.** *Settings → Users* → open your user → set the phone in the
+   Egyptian form `01xxxxxxxxx` (any of `01…`, `+201…`, `201…` matches; the platform normalises them).
+   Then open WhatsApp from that phone, send e.g. *"Need 20 tons of cement, delivery next week"* to the
+   test number, and expect a reply with the purchase-request code (or the clarification question).
+7. **Replies from suppliers** to an RFQ they were invited to still go down the extraction path: the
+   open RFQ invitation decides, not the sender's identity alone.
+
+Things that will bite, in the order they usually do:
+
+* **Signature 401.** Meta signs every delivery with your **app secret** (`X-Hub-Signature-256`). A
+  wrong or missing secret gives `401 {"error":"invalid signature"}` and one log line naming the reason
+  (`missing_app_secret` / `bad_signature`) — never the secret and never the body. In staging/production
+  the app refuses to start with `WHATSAPP_PROVIDER=cloud_api` and no `WHATSAPP_APP_SECRET`.
+* **Unknown sender.** A number that matches neither an active user nor a supplier is recorded as
+  `received_unmatched` for administrators and gets **no** automatic reply. A `phone_number_id` that no
+  tenant registered returns `200 {"processed": 0}` so Meta stops retrying.
+* **The 24-hour window.** Outside 24 hours from the recipient's last message, Meta only allows
+  *approved templates*, not free text (this is Meta's documented rule, unchanged by this repo). The
+  quote-request flow uses templates for that reason; a spontaneous acknowledgement inside the window
+  does not need one.
+* **Unverified here.** No real Meta account was used in this repository's build sandbox: outbound
+  access to `graph.facebook.com` is blocked there, so the provider is exercised against a local server
+  that speaks the documented payload shapes (`docs/E2E.md`). The steps above are the ones to run on a
+  machine with network access; treat the exact console wording for step 1/5 as unverified against the
+  current Meta UI.
+
 ## 8. Scaling notes
 
 * API and worker are stateless; scale horizontally behind a load balancer (sticky not required,

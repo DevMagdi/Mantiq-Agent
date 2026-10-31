@@ -50,9 +50,12 @@ def requirements(config: Settings | None = None) -> list[Requirement]:
 
     whatsapp = (config.whatsapp_provider or "fake").lower()
     if whatsapp == "cloud_api":
+        # APP_SECRET is a hard requirement, not a footnote: without it the Cloud adapter rejects
+        # every webhook (Meta signs each delivery), so the endpoint would answer 401 to real traffic
+        # with nothing in the logs to say why. Refusing to boot is the honest failure mode.
         reqs.append(Requirement("whatsapp", "WHATSAPP_PROVIDER=cloud_api",
-                                ("WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID"),
-                                "WHATSAPP_APP_SECRET is also required to verify webhook signatures"))
+                                ("WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "WHATSAPP_APP_SECRET"),
+                                "the app secret verifies every webhook delivery (X-Hub-Signature-256)"))
     elif whatsapp == "twilio":
         reqs.append(Requirement("whatsapp", "WHATSAPP_PROVIDER=twilio",
                                 ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"),

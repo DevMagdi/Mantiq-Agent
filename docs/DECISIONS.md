@@ -553,3 +553,28 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     the product today. Nothing was removed: the endpoints, the flags and their tests still exist, and
     an operator can turn them on; `tests/test_api_feature_flags.py` pins the shipped defaults so the
     claim in `docs/PROGRESS.md` cannot drift.
+
+123. **The webhook resolves tenancy from the payload, never from a default tenant.** Meta cannot send
+    custom headers, so `x-tenant-slug` defaulting to `nile` meant every WhatsApp webhook landed on the
+    demo tenant. The tenant is now the one that registered the `phone_number_id` on the Integrations
+    screen — the same id the Cloud adapter already sends from. An unregistered number is answered
+    `200 {processed: 0}` (so Meta stops retrying a delivery nothing can accept), logged once, and
+    recorded as `channel.unknown_recipient`; it is never guessed from a header. The header survives
+    only as an explicit fallback for Twilio and local development, and strict deployments ignore the
+    implicit default.
+124. **A signature rejection is a recorded event, not a silent 401.** The response stays opaque
+    (`{"error":"invalid signature"}`), but one log line names the reason (`missing_app_secret` versus
+    `bad_signature`) and an audit row is written — without the secret and without the body. A strict
+    deployment with `WHATSAPP_PROVIDER=cloud_api` now refuses to boot without `WHATSAPP_APP_SECRET`,
+    because a Cloud deployment that cannot verify a single delivery is broken, not degraded.
+125. **A colleague's message becomes a purchase request; a supplier's reply stays a quote.** The
+    inbound router decides in this order: an active user whose profile phone matches *and* who is not
+    currently invited on an open RFQ → `intake.intake_free_text` (the same service `/intake/text`
+    uses), audited as `intake.whatsapp`, answered on WhatsApp with the code or the open clarification
+    question; otherwise a supplier with an open invitation → the existing extraction pipeline;
+    otherwise an unmatched event. The open invitation is the tiebreaker, because a supplier can also
+    be a colleague and the paperwork — not the phone book — says which conversation this is.
+126. **Numbers are normalised once, in one helper.** `services/phone.normalise` resolves the Egyptian
+    local form (`01xxxxxxxxx`), E.164 (`+201…`), bare international (`201…`) and the `00` prefix to
+    country code + national digits, so a phone typed by a human and a `wa_id` emitted by Meta compare
+    equal. It is used for user matching and for supplier matching alike.
