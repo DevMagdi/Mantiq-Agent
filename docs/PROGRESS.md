@@ -1,19 +1,22 @@
 # Build progress — honest status
 
-Updated: 2026-10-31 (phase 3). This file exists so nobody has to guess what works. Each row says what is
-implemented, what is proven by a test, and what genuinely does not exist yet.
+Updated: 2026-10-31 (phase 4 — final hardening and testing). This file exists so nobody has to guess
+what works. Each row says what is implemented, what is proven by a test, and what genuinely does not
+exist yet.
 
-Verification commands behind this snapshot. The first, second and last three run locally on SQLite /
-Node; the PostgreSQL row runs in CI (job `postgres`), because the sandbox has no PostgreSQL with
-`pgcrypto`. Real output for the local rows is pasted in `docs/PR_PHASE3.md`.
+Verification commands behind this snapshot. Every row below was executed for this phase; real output
+is pasted in `docs/PR_PHASE4.md`. The PostgreSQL rows ran against a **real PostgreSQL 16.2** built in
+the sandbox (with the `citext`, `pg_trgm`, `pgcrypto` and `vector` extensions), and the same
+commands run in CI (job `postgres`).
 
 ```bash
-cd backend && pytest tests                     # 659 tests, 0 failures   (local, SQLite)
-cd backend && ruff check app tests             # clean                    (local)
-cd backend && alembic upgrade head && alembic check     # fresh PostgreSQL 16 (CI job postgres)
-python scripts/verify_rls.py                   # 29 guarantees: 6 original + 13 phase-2 + 10 phase-3
-python scripts/load_test.py --users 50 --duration 60    # PASS, see docs/LOAD_TEST.md (local, needs Redis stack)
-cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest run && npm run build
+cd backend && pytest tests                              # 672 tests, 0 failures   (SQLite, test-only)
+cd backend && ruff check app tests                      # clean
+cd backend && alembic upgrade head && alembic check     # fresh PostgreSQL 16.2, 16 migrations, no drift
+python scripts/verify_rls.py                            # 29 guarantees: 6 + 13 (phase 2) + 10 (phase 3)
+python scripts/concurrency_check.py                     # 4 concurrency invariants hold (PostgreSQL)
+python scripts/load_test.py --users 50 --duration 60    # PASS: 39.5 req/s, p50 15 ms, p95 188 ms, 0 errors
+cd frontend && npm run typecheck && npm run lint && npm run test && npm run build   # 74 tests, build ok
 ```
 
 ## Implemented and tested
@@ -48,9 +51,11 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | Frontend | 22 pages across 22 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 74 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
-| Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (42/42 sockets connected) |
-| PostgreSQL verification | Migration chain `0001→0016`, `alembic check`, 67 RLS policies, append-only audit trigger, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (6 + 13 + 10), CI job `postgres` |
-| Load | 50 concurrent role-based sessions (reads + WebSockets): 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors; found and fixed a PII-decryption 500 and a hot-loop in the harness | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
+| Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (44/44 sockets connected under load) |
+| PostgreSQL verification | Migration chain `0001→0016` applied from scratch, `alembic check` (no drift), bootstrap + demo seed, 67 RLS policies, append-only refusals, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (29/29 PASS locally and in CI), CI job `postgres` |
+| Load | 50 concurrent role-based sessions (reads, requisitions, goods receipts and 44 live WebSockets): 39.5 req/s, p50 15 ms, p95 188 ms, p99 662 ms, 0 errors, 108/108 writes accepted; found and fixed a PII-decryption 500, a hot-loop in the harness and two hot-read N+1s | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
+| Concurrency control | The read-modify-write aggregates are locked (`SELECT … FOR UPDATE`) before the check they protect: receipt quantity, invoice payment, journal posting, approval decision. Proven from the outside by firing the same request 5–8× at once | `scripts/concurrency_check.py` (PASS with locks, 400-of-100 received / 6 postings / 5 payments without them), `tests/test_services_receiving.py` (cumulative over-receipt), CI job `postgres` |
+| Hot read paths | `analytics.spend_breakdown` and the supplier list batch their lookups instead of querying per row (spend 55 → 5 ms, supplier list 45 → 13 ms) and the dashboard reads the price history once | `tests/test_services_analytics.py`, `tests/test_api_intake.py`, endpoint timings in `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
 | P2P status machine | The eleven stages (requested → in procurement → RFQ sent → offers received → under approval → PO issued → pending receipt → received → confirmed → ready for audit → posted to accounts) derived from the documents, with an append-only transition history and a bilingual rail | `app/services/p2p.py`, `tests/test_services_p2p.py` (17), `tests/test_api_p2p_accounting_e2e.py` |
 | Requisition routing | The requesting department creates the need; `POST /requests/{id}/assign` routes it to a named buyer and moves it to `in_procurement` | `app/api/v1/intake.py`, `tests/test_api_p2p_accounting_e2e.py` |
@@ -71,6 +76,9 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 | Templates & reminders | 20 bilingual rows per tenant (WhatsApp, email, voice scripts) with `kind`, description, extracted variables and an editable library; reminders and missing-information follow-ups resolve the supplier's channel and language instead of hardcoding email | `app/services/catalog_data.py`, `app/services/messaging.py`, `tests/test_services_reminders_templates.py` (8), `frontend/src/pages/TemplatesPage.tsx` |
 | Feature flags | Deployment switch **and** per-tenant flag, resolved in one place, unknown keys rejected, every gated endpoint failing closed with `BLOCK_FEATURE_OFF`; admin tab to toggle them with bilingual labels | `app/services/features.py`, `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off`, `frontend/src/pages/SettingsPage.tsx` |
 | Phase-3 RBAC | `channel:read/write`, `inbox:read/reply`, `voice:call`, `assistant:use` added to the matrix and mirrored in the UI; the assistant's own intent→permission map is asserted against it | `app/core/rbac.py`, `tests/test_frontend_permissions.py`, `frontend/src/lib/permissions.ts` |
+
+| Phase-4 acceptance cycle | One test walks the whole chain for real: request (text) → clarifications → routed to procurement → RFQ on WhatsApp + email + voice with a simulated inbound WhatsApp reply, email reply and AI voice transcript → extraction + human verification → comparison + negotiation → banded approval chain → PO issued → **partial** receipt → requester confirmation → sealed auditor package → 3-way match → journal entries drafted and posted → supplier ledger moves → costs on the product, cost centre and unit → payment suggestion with **no payment executed**. A second test walks the failure paths (unverified offer, mismatch without an override reason) and a third sweeps every persona's permissions | `tests/test_api_phase4_full_cycle.py` (5 tests) |
+| Audit completeness | Step 16 of the acceptance cycle asserts one audit row per transition of the cycle: `intake.text`, `pr.submitted`, `rfq.created`, `rfq.dispatched`, `extraction.verified`, `negotiation.policy_set`, `approval.requested`, `approval.approve`, `po.issued`, `goods_receipt.created`, `goods_receipt.confirmed`, `invoice.created`, `invoice.approved`, `payment.recorded`, `journal_entry.posted`, `audit_package.assembled`, `audit_package.accepted` | `tests/test_api_phase4_full_cycle.py`, `app/services/po.py` (`po.issued` was missing and was added in this phase) |
 
 ## Partial — real code, but one leg needs infrastructure that is not in this sandbox
 
@@ -101,8 +109,9 @@ cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npx vitest
 
 All three images build (`docker build` in the container job), `helm lint` and `helm template` pass,
 `pip install -e ".[dev]"` works from an empty virtualenv, and the whole test suite runs on
-GitHub-hosted runners (Actions run `41098250455`). A dedicated CI job now migrates a real
-PostgreSQL 16 (`pgvector/pgvector:pg16`) from scratch, runs `alembic check` and proves RLS isolation.
+GitHub-hosted runners. A dedicated CI job migrates a real PostgreSQL 16 (`pgvector/pgvector:pg16`)
+from scratch, runs `alembic check`, proves RLS isolation and (new in this phase) runs the concurrency
+proof `scripts/concurrency_check.py` against the live API.
 The compose file itself is only YAML-validated locally — no Docker daemon ran it. Redis, MinIO and
 the Celery workers are not executed here; their code paths run eagerly in the test suite.
 
@@ -129,3 +138,10 @@ the Celery workers are not executed here; their code paths run eagerly in the te
 8. The load test measures one uvicorn worker against one PostgreSQL instance; it does not prove
    horizontal scaling, and the WebSocket hub still needs the Redis fan-out before running more than
    one API replica (`docs/API.md`).
+9. Concurrent goods receipts against **one** purchase order serialise on that order's row lock by
+   design (that is what makes the cumulative over-receipt check safe). Eleven simultaneous receipts
+   on the same order reach p95 ≈ 1.3 s while the aggregate p95 stays at 188 ms; a real warehouse
+   receives against different orders. Documented rather than "fixed" — removing the lock reopens the
+   race that booked 400 of 100 units (`docs/LOAD_TEST.md`).
+10. Load-test numbers move ±40 % between runs on this shared sandbox (p95 115–260 ms for the same
+   build). The error count and the invariants are the hard signals, not the percentile.

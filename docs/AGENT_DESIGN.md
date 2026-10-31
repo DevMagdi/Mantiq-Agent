@@ -172,3 +172,16 @@ approve it or move money:
    fake so no real API is called in CI.
 4. Voice calls use the telephony adapter's scripted flow; a full duplex STT/TTS loop is an extension
    point behind the same adapter interface.
+
+## 9. Phase-4 re-verification of the safety principles
+
+Phase 4 added concurrency control, not capability. The audits below are the ones that must never be
+"fixed" by widening the agent's surface:
+
+| Principle | What still holds after the hardening | Proof |
+| --- | --- | --- |
+| The LLM proposes, the human decides | The acceptance cycle only reaches a purchase order through `approval.decide` calls made by named users; the agent stages end at `approval` | `tests/test_api_phase4_full_cycle.py` (approval chain), `tests/test_agents_graph.py` |
+| No autonomous acceptance, signing or payment | No tool, stage or LLM call touches `record_payment`, `approve_invoice`, `confirm_receipt`, `close_po`; the payment suggestion is `requires_human_approval: true` with `execution: outside_platform` | `test_post_award_human_actions_have_no_agent_tool`, `tests/test_services_invoicing.py`, `AC-P4-4` |
+| Voice and messaging agents never approve or commit | `voice_agent.classify_question` returns a fixed refusal plus a `block_code` for competitor prices, commitments, award intent, spec changes and payment; the assistant's forbidden intents return `ASSISTANT_FORBIDDEN_ACTION` and `can_act: false` | `tests/test_services_voice_agent.py`, `tests/test_services_assistant.py` |
+| Supplier content is untrusted | Inbound WhatsApp/email/voice text still goes through the same scanning and human verification before an offer exists — the phase-4 channel work did not add a path from an inbound message to an award | `tests/test_injection_corpus.py`, `tests/test_api_phase4_full_cycle.py` (extraction → verification) |
+| The books cannot be moved by a race | The new locks protect *human* actions from concurrent duplicates; they grant the agent nothing | `scripts/concurrency_check.py`, `docs/DECISIONS.md` 89–91 |

@@ -8,6 +8,12 @@ whole run — the same shape as 50 people using the browser app.
 ```bash
 # PostgreSQL 16 must be up and migrated first (see docs/RUNBOOK.md §2a)
 python scripts/load_test.py --users 50 --duration 60 --json /tmp/load.json
+
+# Flags that matter for a reproducible run:
+#   --receipt-orders 5   seed this many large, freshly issued orders for the warehouse personas
+#   --no-seed            skip seeding (every goods receipt is then refused by the over-receipt guard)
+#   --provision          create one account per virtual user (default on) so rate limits bucket
+#                        per identity rather than per address
 ```
 
 ## What a virtual user does
@@ -25,28 +31,33 @@ Each persona only calls endpoints its role may read, so a 403 anywhere is a fail
 doubles as a live check of the RBAC map. Think time is a uniform 0.4–1.8 s per request, and the 50
 users ramp up over 10 s (so the 71.5 s wall clock below = 10 s ramp + 60 s load + drain).
 
+Besides reading, the personas **write**: buyers file requisitions through `POST /intake/text` and
+warehouse staff post partial goods receipts (`POST /purchase-orders/{id}/receipts`) against the
+seeded orders, at a 15 % probability per loop. Writes are scored separately from errors — a 422
+business-rule refusal is a correct answer, a 5xx is not.
+
 ## Result — 50 users, 60 s, PostgreSQL 16.2 (single uvicorn worker, 10+20 connection pool)
 
+Final phase-4 run, on a **freshly migrated and freshly seeded** database (`alembic upgrade head`,
+`app.cli bootstrap`, `app.cli seed-demo`), with the rate limiter **enabled** and five receipt-ready
+orders seeded for the warehouse personas:
+
 ```
-requests        2928  (40.9 req/s over 71.6s)
-errors          0  (0.00 %)
-latency ms      p50 14 | p95 116 | p99 393 | max 1036
-status          {'200': 2928}
-websockets      42/42 connected, 168 frames, 0 reconnects
+requests        2823  (39.5 req/s over 71.5 s)
+errors          0      (0.00 %)
+latency ms      p50 15 | p95 188 | p99 662 | max 1435
+status          {'200': 2715, '201': 108}
+writes          108 attempted | 108 ok | 0 refused by a business rule
+websockets      44/44 connected, 14959 frames, 0 reconnects, 0 failed upgrades
 logins          50 ok / 0 failed
+load-test accounts 50 provisioned (one per virtual user, so the rate limiter buckets per identity)
 ------------------------------------------------------------------------
-  /api/v1/analytics/kpis                         n=  22 p50=  15.5 p95=  50.0
-  /api/v1/analytics/spend                        n=  36 p50=  16.2 p95=  35.0
-  /api/v1/approvals?page_size=20                 n= 154 p50=  14.3 p95=  61.5
-  /api/v1/dashboard                              n= 532 p50=  29.7 p95= 190.3
-  /api/v1/notifications?page_size=10             n= 470 p50=  11.5 p95= 126.8
-  /api/v1/purchase-orders?page_size=20           n= 574 p50=  11.9 p95=  52.4
-  /api/v1/purchase-orders?page_size=5            n=  60 p50=  12.9 p95= 140.0
-  /api/v1/requests?page_size=20                  n= 353 p50=  10.2 p95=  87.7
-  /api/v1/rfqs/board                             n=  65 p50=   9.9 p95= 123.3
-  /api/v1/rfqs?page_size=20                      n= 392 p50=  11.0 p95=  57.5
-  /api/v1/supplier-balances                      n= 109 p50=  12.8 p95=  64.8
-  /api/v1/suppliers?page_size=20                 n= 161 p50=  49.7 p95= 117.5
+  slowest endpoints (p95, this run)
+  POST /purchase-orders/{id}/receipts  (11 at once on ONE order)   1307
+  /rfqs/{id}/channels                                              1021
+  /purchase-orders/{id}                                             770
+  POST /intake/text                                                 573
+  /accounting/cost-report?group_by=cost_center                       446
 ------------------------------------------------------------------------
   [PASS] p95 < 800 ms
   [PASS] p99 < 2000 ms
@@ -56,40 +67,78 @@ logins          50 ok / 0 failed
 RESULT: PASS
 ```
 
-**Interpretation.** p95 of 116 ms and p99 of 393 ms mean the database round trip, not the API layer,
-is the tail: `/dashboard`, `/suppliers` and `/notifications` are the heaviest endpoints (they
-aggregate across tables and decrypt supplier contacts), and all three stay under 200 ms at p95 while
-50 users hammer them. Zero 5xx, zero 429s and zero pool timeouts at 41 req/s confirms the 10+20 pool
-is sized generously for this population; 42 simultaneous WebSockets were accepted and answered
-every heartbeat (168 frames = 42 sockets × 2 heartbeats + broadcasts).
+### Run-to-run variance (same code, same machine)
 
-**Two real defects this test found** (both fixed on this branch):
+| Run | What it did | requests | p95 | p99 | errors |
+| --- | --- | --- | --- | --- | --- |
+| v4 | 5 POs, receipts spread by user index | 2859 | 163.6 | 369.9 | 0 |
+| final-2 | fresh seed, receipts refused (order already received) | 2862 | 115.3 | 553.4 | 0 |
+| final-5 | fresh seed + 5 seeded receipt-ready orders | 2823 | 188.2 | 661.8 | 0 |
 
-1. `GET /suppliers` returned 500 under load once a tenant's encrypted contacts could not be
-   decrypted (a master-key mismatch after the demo data had been seeded with a different secret) —
-   one unreadable row took the whole screen down. Decryption now fails closed (`CryptoError` →
-   empty PII, one error log per tenant) and the list renders; covered by
-   `tests/test_crypto_resilience.py`.
-2. The harness itself was pinging in a hot loop (937k frames), which inflated latency to p50 47 ms /
-   p95 456 ms. It now sends one heartbeat every 25 s like the SPA, and the numbers above are from
-   the corrected loop.
+The sandbox is a shared machine, so the tail moves by ±40 % between runs while p50 stays at
+15–21 ms and the error count stays at zero in every run. The numbers above are reported as measured,
+not as a best case.
 
-Pass criteria are enforced by the script's exit code, so the same command can gate a release.
+**Interpretation.** p50 of 15 ms and p95 of 188 ms with 44 live WebSockets and 39.5 req/s mean the
+request path is healthy and the tail is queueing, not slowness: one uvicorn worker executes ~25 ms of
+CPU per request on average, and 50 users with 0.4–1.8 s think time spend most of their life waiting.
+The two tails that stand out are both deliberate:
 
-**Interpretation.** p95 of 82 ms and p99 of 317 ms mean the database round trip, not the API layer,
-is the tail: `/dashboard`, `/supplier-balances` and `/suppliers` are the three heaviest endpoints
-(they aggregate across tables), and all three stay under 140 ms at p95 while 50 users hammer them.
-Zero 5xx and zero pool timeouts at 41 req/s confirms the 10+20 pool is sized generously for this
-population; 42 simultaneous WebSockets were accepted and answered every heartbeat.
+* **`POST /purchase-orders/{id}/receipts` on one order (p95 1307 ms, n=11).** Eleven warehouse users
+  receiving against the *same* purchase order serialise on that row's `SELECT … FOR UPDATE` — that is
+  the lock that stops a cumulative over-receipt (decision 89/90). Across all orders the receipt p95 is
+  125–390 ms; the aggregate p95 stays 188 ms. Correctness over 100 ms on a pathological burst.
+* **`/rfqs/{id}/channels` and `/purchase-orders/{id}`** aggregate per-supplier delivery evidence and
+  the delivery timeline; at 8–10 samples per run their p95 is dominated by one slow sample. Their p50
+  is 35–48 ms.
+
+**Write path, measured.** 108 writes (requisitions and partial goods receipts) were issued by the
+personas and all 108 succeeded; the harness reports refusals separately, because a business-rule
+refusal under concurrency is the *correct* answer rather than an error. When the demo orders are
+already fully received (`--no-seed`) the same run records ~50 % refusals with `422 OVER_RECEIPT` and
+still zero errors — the guard from decision 89 doing its job.
+
+**Defects this test found and fixed in phase 4:** see `docs/PR_PHASE4.md` — the two hot read paths
+(`analytics.spend_breakdown` N+1, supplier list N+1) were found by profiling the endpoints below the
+top of this table, and the harness itself was measuring a lock instead of the system until it spread
+receipts per user.
+
+## Concurrency proof — the invariants, not just the latency
+
+`scripts/concurrency_check.py` fires the *same dangerous request* many times at once through the real
+HTTP API and then reads the database to check the invariant. It runs in CI (job `postgres`).
+
+```
+PASS  goods receipt: no cumulative over-delivery — 2/8 receipts accepted, 100 of 100 received
+PASS  journal posting: exactly one post, no duplicated lines — 1/6 posts accepted, 2 lines, posted
+PASS  supplier payment: one payment recorded, no overpayment — 1/5 payments accepted, 10000 of 10000
+PASS  approval decision: exactly one decision wins — 1/5 decisions accepted, final status approved
+
+All concurrency invariants held.
+```
+
+The same script with the four `lock_for_update` calls removed (measurement, not speculation):
+
+```
+FAIL  goods receipt: no cumulative over-delivery — 8/8 receipts accepted, 400 of 100 received
+FAIL  journal posting: exactly one post, no duplicated lines — 6/6 posts accepted, 12 journal lines
+FAIL  supplier payment: one payment recorded, no overpayment — 5/5 payments accepted
+FAIL  approval decision: exactly one decision wins — 5/5 decisions accepted (timing dependent,
+      it passes without the lock when the requests do not overlap closely enough — which is exactly
+      why a lock, not a timing assumption, is required)
+```
 
 ## Caveats (kept explicit)
 
-* One uvicorn process, one PostgreSQL instance on the same machine, no Redis (rate limiting was
-  disabled for the run), no TLS, no reverse proxy. A production deployment adds a hop; it also adds
+* One uvicorn process, one PostgreSQL instance on the same machine, no Redis (the in-process rate
+  limiter was **enabled**, and the run provisions one account per virtual user so the limits bucket
+  per identity), no TLS, no reverse proxy. A production deployment adds a hop; it also adds
   replicas and a connection pooler.
-* Reads dominate because a human browsing the app issues reads. Write-heavy paths (intake, dispatch,
-  approval decisions) are covered by the functional suites, not by this run — flooding them would
-  mutate the demo dataset.
+* Reads dominate because a human browsing the app issues reads. The write paths exercised here are
+  intake and goods receipts; dispatch and approval decisions are covered by the functional suites and
+  by `scripts/concurrency_check.py`, not by this run — flooding them would mutate the demo dataset.
+* The sandbox is a shared machine: consecutive runs of the same build move p95 between 115 and
+  260 ms. Treat the numbers as an order of magnitude and the error count as the hard signal.
 * `python scripts/load_test.py --users 200` will exceed a single worker long before it saturates
   PostgreSQL; scale the API (replicas) and add the Redis pub/sub fan-out for the WebSocket hub
   (`docs/API.md` → WebSocket) before raising the number.

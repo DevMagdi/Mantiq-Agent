@@ -28,6 +28,15 @@ interactive docs: `/api/docs`.
   Status codes used: `400` malformed, `401` unauthenticated, `403` missing permission,
   `404` not found **or not yours**, `409` illegal state transition, `422` validation/business rule,
   `429` rate limited, `503` dependency unavailable.
+* **Concurrency.** Every read-modify-write aggregate is locked for the duration of the request
+  (`SELECT … FOR UPDATE` on the purchase order before a receipt, the supplier invoice before a
+  payment, the journal entry before posting, the approval before a decision). Two clients that race
+  therefore get one winner and one business-rule refusal (`409`/`422`), never a doubled number. The
+  proof — including what happens with the locks removed — is `scripts/concurrency_check.py` and
+  `docs/LOAD_TEST.md`.
+* **Rate limits.** `240` requests/minute per authenticated identity, `600`/minute per anonymous
+  address, and login at `10`/minute per account plus `120`/minute per address; exceeding any of them
+  returns `429` with `Retry-After`.
 * **Pagination.** List endpoints accept `page` / `page_size` and return
   `{"items": [...], "total": n, "page": 1, "page_size": 20}`.
 * **Idempotency.** Mutating agent/tool calls accept an `idempotency_key`; message sends are
@@ -201,7 +210,27 @@ DELETE`), so a posted number cannot be rewritten behind the API — corrections 
 **Error codes** (RFC 9457 `code`): `empty_entry`, `unknown_account`, `unbalanced` (with both totals),
 `unknown_cost_center`, `missing_cost_center`, `duplicate_accrual`, `no_confirmed_receipt`,
 `invoice_not_approved`, `match_not_clean`, `audit_review_required`, `segregation_of_duties`,
-`already_posted`, `already_reversed`, `reversal_reason_required`.
+`already_posted`, `already_reversed`, `reason_required`.
+
+## Receipts and delivery quantities (phase 4)
+
+`POST /purchase-orders/{po_id}/receipts` measures every line against what is **still owed**: the
+ordered quantity minus everything already booked as `received` or `confirmed` on that order. A receipt
+that would exceed the order is refused with `422` and a per-line body, so the warehouse sees which
+line and how much:
+
+```json
+{"detail": "Receipt exceeds the quantity still on order.",
+ "code": "validation_failed",
+ "issues": [{"code": "OVER_RECEIPT", "line_no": 1, "ordered": "100", "already_received": "60",
+             "requested": "50", "available": "40"}]}
+```
+
+The check runs under a row lock on the purchase order, so two deliveries cannot both slip through
+concurrently (see the Concurrency convention above).
+
+`GET /purchase-orders` accepts `rfq_id` in addition to `status`, `supplier_id` and the usual
+pagination, which is what the RFQ screen uses to jump from an award to its orders.
 
 ## Channels, inbox, voice and assistant (phase 3)
 
@@ -301,7 +330,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | DELETE | `/api/v1/api-keys/{key_id}` | Revoke an API key | admin |
 | GET | `/api/v1/approvals` | Approval inbox | rfq |
 | POST | `/api/v1/approvals/escalate` | Run SLA escalation for overdue approvals | rfq |
-| POST | `/api/v1/approvals/{approval_id}/decide` | Approve / reject / request revision / split award | rfq |
+| POST | `/api/v1/approvals/{approval_id}/decide` | Approve / reject / request revision / split award — a step that is no longer `pending` returns `422` | rfq |
 | POST | `/api/v1/approvals/{approval_id}/delegate` | Delegate an approval | rfq |
 | POST | `/api/v1/assistant/ask` | Ask the internal assistant (read-only, RBAC-scoped) | channels |
 | GET | `/api/v1/assistant/sessions` | My recent assistant conversations | channels |
@@ -517,15 +546,26 @@ that is the documented scale-out point. `scripts/load_test.py` exercises 42 conc
 | `GET /rfqs/board` | none — returns stages with counts |
 | `GET /extractions` | `rfq_id`, `status` |
 | `GET /approvals` | `status` |
-| `GET /purchase-orders` | none (tenant scoped) |
+| `GET /purchase-orders` | `status`, `supplier_id`, `rfq_id`, `q`, `page`, `page_size` |
 | `GET /suppliers` | `q`, `category`, `page`, `page_size` |
 | `GET /analytics/*` | `days` |
 
 ## Rate limits
 
-`RATE_LIMIT_PER_MINUTE` (default 240) per client IP, enforced by middleware with a Redis counter
-when Redis is configured and an in-process counter otherwise. Exceeding it returns `429` with a
-`retry-after` header.
+Limits are enforced by middleware, with a Redis counter when Redis is configured and an in-process
+counter otherwise; exceeding any of them returns `429` with a `retry-after` header.
+
+| Bucket | Default | Setting |
+| --- | --- | --- |
+| Authenticated identity (`user:<sub>`) | 240 / minute | `RATE_LIMIT_PER_MINUTE` |
+| Anonymous address (`ip:<host>`) | 600 / minute | `RATE_LIMIT_ANONYMOUS_PER_MINUTE` |
+| Login, per account | 10 / minute | `RATE_LIMIT_LOGIN_PER_ACCOUNT` |
+| Login, per address | 120 / minute | `RATE_LIMIT_LOGIN_PER_IP` |
+
+Authenticated traffic is bucketed **per identity, not per address**: a hundred staff behind one
+company NAT, or fifty load-test users on one IP, are not throttled as a single client, while one
+compromised account still hits its own ceiling. Login is limited on both axes so an address cannot
+be used to spray credentials across many accounts.
 
 ## Versioning
 
