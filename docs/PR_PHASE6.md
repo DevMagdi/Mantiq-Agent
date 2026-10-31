@@ -37,6 +37,19 @@ New tests this phase: `tests/test_accounting_hidden.py` (6), `tests/test_api_wha
 `tests/test_services_po_pdf.py` (7), three in `tests/test_cli.py`, one in `tests/test_api_feature_flags.py`,
 `frontend/src/accounting.hidden.test.tsx`.
 
+## CI (GitHub Actions, this branch)
+
+All six required checks are green on the final commit: Backend (lint, migrate, tests, coverage),
+Frontend (typecheck, lint, tests, build), **PostgreSQL 16 (migrations, RLS, search indexes)**,
+Helm chart lint, Secrets & dependency scan, Container images build.
+
+The PostgreSQL job caught a real consequence of hiding accounting, and it was fixed rather than
+bypassed: two of its steps exercise the module (`seed-demo` writes the demo chart of accounts, and the
+concurrency proof posts a journal entry against accounts 510100/210100). Both now run with
+`ACCOUNTING_ENABLED=true`, explicitly; the invariants and the concurrency counts are untouched. The
+failure mode was reproduced locally first (switch off → `gl_account` empty → scenario B asserts on it;
+switch on → 22 accounts → the scenario runs).
+
 ## What could not be run here
 
 1. **The Arabic PDF has never been rendered to pixels.** This sandbox has no `pdftoppm`/`mutool`/`qpdf`,
