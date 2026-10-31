@@ -226,6 +226,15 @@ Things that will bite, in the order they usually do:
   machine with network access; treat the exact console wording for step 1/5 as unverified against the
   current Meta UI.
 
+### Checking a purchase-order PDF in Arabic
+
+Open any issued PO's PDF (`GET /api/v1/purchase-orders/{id}/pdf`, or the *PDF* button on the order
+screen) and confirm four things: the Arabic lines read right to left, the letters are joined
+(`حديد` — not `ح د ي د`), Latin and numeric columns are not mirrored, and the text is not boxes. If it
+is boxes, the deployment is missing the bundled font or `uharfbuzz`: `python -c "from
+app.services.pdf_fonts import arabic_ready; print(arabic_ready())"` prints `False`, and the application
+log carries `Arabic PDF font missing` or `shaping is not installed`. Nothing failed silently by design.
+
 ## 8. Scaling notes
 
 * API and worker are stateless; scale horizontally behind a load balancer (sticky not required,

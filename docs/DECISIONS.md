@@ -598,3 +598,17 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     one line about vendors being verified against local servers that speak the documented payloads,
     never against live APIs. This matters more than any feature: a reader makes deployment decisions
     from the README, and the first real vendor call is an integration test with a human watching.
+130. **Arabic in the PO PDF: one bundled font, HarfBuzz shaping, and a run-splitting pass instead of a
+    bidi dependency.** ReportLab draws a TrueType font happily and still produces unreadable Arabic,
+    because it draws stored characters: the letters stay disconnected and the line stays in logical
+    order. The fix has three parts. (1) The font travels with the code — Noto Naskh Arabic Regular and
+    Bold plus its OFL-1.1 licence under `app/assets/fonts/`, declared as package data, so a PO opens
+    correctly on a machine that has never installed an Arabic font. (2) Shaping — the faces are
+    registered as *shapable* and strings are passed through `ttfonts.shapeStr`, which shapes with
+    HarfBuzz (`uharfbuzz`, Apache-2.0, now a declared dependency; approved before it was added).
+    (3) Ordering — Arabic and ASCII runs are drawn separately, because one HarfBuzz buffer has one
+    direction and a mixed run reverses the ASCII with the Arabic (the classic mirrored price). The run
+    splitter in `pdf_fonts.display_runs` is the subset of the bidi algorithm a document line needs: the
+    paragraph direction comes from the first strong character, neutral characters stay with the run
+    they follow, and the runs are emitted in visual order. That avoided `python-bidi`/`arabic-reshaper`,
+    which would have been two more dependencies to vet and would still have needed the same font.
