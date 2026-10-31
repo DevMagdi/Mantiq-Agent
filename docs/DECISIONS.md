@@ -592,3 +592,9 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     `BOOTSTRAP_DEMO_PASSWORD` is still the shipped default. Dev and test keep the one-command demo
     flow untouched, and `ALLOW_FAKE_PROVIDERS` does not excuse a published password — it excuses fake
     adapters, nothing else.
+129. **The README describes what was tested, not what was wired.** The WhatsApp intake sentence claimed
+    a channel that silently discarded every real delivery (fixed above) and listed AI voice calls with
+    no mention that the pilot places none. The README now names the actual intake behaviour and adds
+    one line about vendors being verified against local servers that speak the documented payloads,
+    never against live APIs. This matters more than any feature: a reader makes deployment decisions
+    from the README, and the first real vendor call is an integration test with a human watching.
