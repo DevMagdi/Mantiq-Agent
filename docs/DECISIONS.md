@@ -578,3 +578,10 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     local form (`01xxxxxxxxx`), E.164 (`+201…`), bare international (`201…`) and the `00` prefix to
     country code + national digits, so a phone typed by a human and a `wa_id` emitted by Meta compare
     equal. It is used for user matching and for supplier matching alike.
+127. **The call screens say what the pilot actually does.** Both AI-voice switches already default to
+    false, but the wording still promised live AI speech ("Start an AI call", "the AI disclosure is the
+    first thing the supplier hears"). The pilot places no live audio: the call is a scripted transcript
+    whose disclosure, turns and refusals are real records. The screen now carries one line saying so
+    (Arabic first, English second), and the action reads "Start a call" / "بدء مكالمة". Nothing was
+    deleted — the buttons, the endpoints and their request shapes are untouched, so an operator who
+    turns the flags on gets exactly the phase-3 behaviour with honest labels.
