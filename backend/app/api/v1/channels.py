@@ -58,7 +58,9 @@ async def _invitation(ctx: Context, rfq_id: str, supplier_id: str) -> RFQSupplie
 # ------------------------------------------------------------------ capabilities & flags
 @router.get("/channels/capabilities", summary="Available supplier channels and their state")
 async def capabilities(ctx: Context = Depends(require("channel:read"))):
-    provider = registry.resolve("whatsapp")
+    from app.services import integrations as integration_service
+
+    provider = await integration_service.adapter_for(ctx.session, ctx.tenant, "whatsapp")
     return {
         "channels": [
             {**channels.label(channel), "enabled": channels.require_feature(ctx.tenant, channel),

@@ -31,6 +31,27 @@ Critical providers (a fake is fatal in `staging`/`production`): `EMAIL_PROVIDER`
 `VOICE_AI_ENABLED=true`. Everything else (SMS, search, OCR, ERP, payment) is an opt-in capability and
 only produces a startup warning.
 
+### 2.1 Runtime integrations (no `.env` edit)
+
+Everything below is the *platform* default. A tenant administrator can also save their own credentials
+for `llm`, `whatsapp`, `sms`, `telephony`, `email` and `search` on the **Settings → Integrations**
+screen (`PUT /api/v1/admin/integrations/{kind}`); the row is encrypted at rest, masked in the API and
+takes precedence over the variables in this document for that tenant only.
+
+Precedence, per request and per tenant: **tenant integration (complete *and* enabled) → legacy
+`LlmProviderConfig` row (LLM only) → platform default from `.env`**. Disabling, deleting or
+incompleting the tenant row removes it from the chain, so traffic returns to the platform adapter —
+which is exactly what "disable" means on that screen.
+
+Two honest limits:
+
+* the boot-time provider gate (`assert_ready`) reads the environment, because a process starts before
+  it knows which tenants exist. A strict deployment therefore still needs a real `EMAIL_PROVIDER` and
+  `LLM_PROVIDER`, even if every tenant later supplies its own credentials;
+* `python -m app.cli doctor` reports the process view. The per-tenant truth is
+  `GET /api/v1/admin/integrations`, which lists every provider as `live`, `sandbox`, `not_configured`,
+  `error` or `disabled` with the missing field names.
+
 ## 3. Messaging providers
 
 ### WhatsApp

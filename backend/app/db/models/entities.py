@@ -12,6 +12,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -1173,6 +1175,9 @@ class IntegrationConfig(Base, UUIDMixin, TimestampMixin):
     secrets_enc: Mapped[str] = mapped_column(Text, default="")
     key_id: Mapped[str] = mapped_column(String(40), default="")
     status: Mapped[str] = mapped_column(String(24), default="configured")
+    # Disabling is a reversible, safe action: the platform adapter takes over immediately.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    last_error: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
     last_tested_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 

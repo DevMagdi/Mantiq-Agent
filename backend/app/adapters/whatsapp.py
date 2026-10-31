@@ -189,14 +189,15 @@ class CloudWhatsAppProvider(_ParsingMixin):
     BASE = "https://graph.facebook.com/v20.0"
 
     def __init__(self, token: str, phone_id: str, app_secret: str = "",
-                 quote_flow_id: str = "") -> None:
+                 quote_flow_id: str = "", base_url: str = "") -> None:
         self.token = token
         self.phone_id = phone_id
         self.app_secret = app_secret
         self.quote_flow_id = quote_flow_id
+        self.base_url = (base_url or self.BASE).rstrip("/")
 
     async def _post(self, payload: dict[str, Any]) -> SendResult:
-        url = f"{self.BASE}/{self.phone_id}/messages"
+        url = f"{self.base_url}/{self.phone_id}/messages"
         headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=20) as client:

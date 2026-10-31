@@ -14,10 +14,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.base import InboundMessage, registry
+from app.adapters.base import InboundMessage
 from app.core.audit import audit
 from app.db.models.entities import RFQ, RFQSupplier, Supplier, Tenant
 from app.services import channels
+from app.services import integrations as integration_adapters
 from app.services.extraction import ingest_inbound
 from app.services.features import is_enabled
 from app.services.messaging import (
@@ -126,7 +127,7 @@ async def handle_webhook(session: AsyncSession, tenant: Tenant, payload: dict[st
     Order matters. Receipts first (they are cheap and idempotent), then consent keywords, then the
     message pipeline — stopping an opted-out supplier's text from ever reaching an RFQ.
     """
-    provider = registry.resolve("whatsapp")
+    provider = await integration_adapters.adapter_for(session, tenant, "whatsapp")
     statuses = provider.parse_statuses(payload) if hasattr(provider, "parse_statuses") else []
     receipts = []
     for status in statuses:
@@ -186,7 +187,7 @@ async def ingest_inbound_whatsapp(session: AsyncSession, tenant: Tenant,
 
     attachment_payloads: list[tuple[str, bytes]] = []
     extra_text = ""
-    provider = registry.resolve("whatsapp")
+    provider = await integration_adapters.adapter_for(session, tenant, "whatsapp")
     for attachment in inbound.attachments or []:
         media_id = attachment.get("id", "")
         kind = attachment.get("kind", "document")
@@ -197,7 +198,7 @@ async def ingest_inbound_whatsapp(session: AsyncSession, tenant: Tenant,
             continue
         filename = attachment.get("filename") or f"{kind}-{media_id[:8]}"
         if kind == "audio":
-            stt = registry.resolve("stt")
+            stt = await integration_adapters.adapter_for(session, tenant, "stt")
             transcript = await stt.transcribe(data=data, filename=filename, language="ar")
             extra_text += f"\n{transcript.text}"
             attachment_payloads.append((f"{filename}.txt", transcript.text.encode("utf-8")))

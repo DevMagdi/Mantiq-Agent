@@ -103,6 +103,7 @@ class Vendor:
     """Records what the application sent, in the vendor's own wire format."""
 
     twilio_messages: list[dict] = field(default_factory=list)
+    twilio_account_calls: list[str] = field(default_factory=list)
     llm_calls: list[dict] = field(default_factory=list)
 
 
@@ -110,6 +111,17 @@ def build_vendor_app(vendor: Vendor) -> Any:
     # `from __future__ import annotations` turns these annotations into strings; FastAPI resolves
     # them against module globals, so the framework imports stay at module level in this script.
     app = FastAPI()
+
+    @app.get("/2010-04-01/Accounts/{sid}.json")
+    async def twilio_account(sid: str, request: Request):
+        vendor.twilio_account_calls.append(sid)
+        expected = "Basic " + __import__("base64").b64encode(
+            f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+        if request.headers.get("authorization") != expected:
+            return JSONResponse(status_code=401,
+                                content={"code": 20003, "message": "Authenticate"})
+        return JSONResponse(content={"sid": sid, "friendly_name": "ProcureAI E2E",
+                                     "status": "active"})
 
     @app.post("/2010-04-01/Accounts/{sid}/Messages.json")
     async def twilio_messages(sid: str, request: Request):
@@ -191,6 +203,12 @@ class Api:
     async def post(self, path: str, headers: dict[str, str], **kwargs: Any) -> Any:
         return await self.client.post(path, headers=headers, **kwargs)
 
+    async def put(self, path: str, headers: dict[str, str], **kwargs: Any) -> Any:
+        return await self.client.put(path, headers=headers, **kwargs)
+
+    async def patch(self, path: str, headers: dict[str, str], **kwargs: Any) -> Any:
+        return await self.client.patch(path, headers=headers, **kwargs)
+
 
 async def ws_client(base: str, token: str, bucket: list[dict], label: str) -> Any:
     import websockets
@@ -264,6 +282,7 @@ def prepare_database(database_url: str, env: dict[str, str]) -> None:
         print(f"  {label}: ok", flush=True)
 
 
+
 def replica_env(base_env: dict[str, str], vendor_url: str, redis_url: str | None,
                 public_url: str) -> dict[str, str]:
     env = dict(base_env)
@@ -272,19 +291,13 @@ def replica_env(base_env: dict[str, str], vendor_url: str, redis_url: str | None
         # A staging box is strict by default; this run deliberately keeps the *optional* providers
         # on their fakes (search, OCR, ERP) while the ones under test are real.
         "ALLOW_FAKE_PROVIDERS": "true",
-        "WHATSAPP_PROVIDER": "twilio",
-        "SMS_PROVIDER": "twilio",
-        "TELEPHONY_PROVIDER": "twilio",
-        "TWILIO_ACCOUNT_SID": TWILIO_SID,
-        "TWILIO_AUTH_TOKEN": TWILIO_TOKEN,
-        "TWILIO_WHATSAPP_FROM": TWILIO_WHATSAPP_FROM,
-        "TWILIO_SMS_FROM": "+14155238886",
-        "TWILIO_BASE_URL": vendor_url,
+        # The platform itself is left on the fakes: everything real in this run has to come from the
+        # Integrations screen, which is exactly what the journeys below then verify.
+        "WHATSAPP_PROVIDER": "fake",
+        "SMS_PROVIDER": "fake",
+        "TELEPHONY_PROVIDER": "fake",
         "TWILIO_WEBHOOK_URL": f"{public_url}/api/v1/inbound/whatsapp",
-        "LLM_PROVIDER": "anthropic",
-        "LLM_API_KEY": "sk-ant-e2e",
-        "LLM_MODEL": "claude-sonnet-4-5-20250929",
-        "LLM_BASE_URL": vendor_url,
+        "LLM_PROVIDER": "fake",
         "REDIS_URL": redis_url or "",
         "WS_FANOUT_ENABLED": "true" if redis_url else "false",
         "RATE_LIMIT_ENABLED": "false",
@@ -467,6 +480,106 @@ async def journey_llm(api: Api, buyer_headers: dict[str, str], rfq_id: str,
     say("LLM extraction", f"a supplier reply was read by the real provider ({sorted(models)})")
 
 
+
+async def journey_integrations(api: Api, admin_headers: dict[str, str], vendor_url: str,
+                               vendor: Vendor) -> None:
+    """The Integrations screen: save real credentials, probe them, and go Live — with no .env edit."""
+    listing = await api.get("/api/v1/integrations", admin_headers)
+    if listing.status_code != 200:
+        fail("integrations", listing.text[:300])
+    body = listing.json()
+    items = {row["kind"]: row for row in body["items"]}
+    if items["llm"]["status"] != "sandbox":
+        fail("integrations", f"expected the platform fake to read as sandbox, got {items['llm']['status']}")
+    if body["platform_adapters"]["llm"] != "fake":
+        fail("integrations", "the platform adapter should still be the fake at this point")
+
+    secret = "sk-ant-e2e-tenant-key"
+    llm = await api.put("/api/v1/integrations/llm", admin_headers, json={
+        "provider": "anthropic",
+        "config": {"model": "claude-sonnet-4-5-20250929", "base_url": vendor_url},
+        "secrets": {"api_key": secret},
+        "enabled": True,
+    })
+    if llm.status_code != 200 or llm.json()["status"] != "live":
+        fail("integrations", f"saving the model returned {llm.status_code} {llm.text[:300]}")
+    if secret in llm.text:
+        fail("integrations", "the API echoed the secret back to the browser")
+    if not llm.json()["masked"].get("api_key", "").endswith(secret[-4:]):
+        fail("integrations", "the mask does not identify the stored key")
+
+    probe = await api.post("/api/v1/integrations/llm/test", admin_headers)
+    if probe.status_code != 200 or not probe.json()["ok"]:
+        fail("integrations", f"model probe failed: {probe.text[:300]}")
+
+    whatsapp = await api.put("/api/v1/integrations/whatsapp", admin_headers, json={
+        "provider": "twilio",
+        "config": {"account_sid": TWILIO_SID, "from_number": TWILIO_WHATSAPP_FROM,
+                   "base_url": vendor_url},
+        "secrets": {"auth_token": TWILIO_TOKEN},
+        "enabled": True,
+    })
+    if whatsapp.status_code != 200 or whatsapp.json()["status"] != "live":
+        fail("integrations", f"saving WhatsApp returned {whatsapp.status_code} {whatsapp.text[:300]}")
+    wa_probe = await api.post("/api/v1/integrations/whatsapp/test", admin_headers)
+    if wa_probe.status_code != 200 or not wa_probe.json()["ok"]:
+        fail("integrations", f"WhatsApp probe failed: {wa_probe.text[:300]}")
+    if not vendor.twilio_account_calls:
+        fail("integrations", "the probe never reached the Twilio account endpoint")
+
+    after = await api.get("/api/v1/integrations", admin_headers)
+    if secret in after.text:
+        fail("integrations", "a reload of the screen exposes the stored secret")
+    statuses = {row["kind"]: row["status"] for row in after.json()["items"]}
+    say("integrations", f"fake → live from the screen: llm={statuses['llm']}, "
+                         f"whatsapp={statuses['whatsapp']}, platform still "
+                         f"{after.json()['platform_adapters']['llm']}")
+
+
+async def _anthropic_extractions(api: Api, headers: dict[str, str], rfq_id: str) -> int:
+    queue = await api.get("/api/v1/extractions", headers, params={"page_size": 100})
+    rows = queue.json().get("items", [])
+    return sum(1 for row in rows
+               if row.get("rfq_id") == rfq_id and str(row.get("model") or "").startswith("anthropic:"))
+
+
+async def journey_integration_safety(api: Api, admin_headers: dict[str, str],
+                                     buyer_headers: dict[str, str], rfq_id: str,
+                                     supplier_id: str, vendor: Vendor) -> None:
+    """Disabling the model must fall back safely; re-enabling must restore it."""
+    before = await _anthropic_extractions(api, buyer_headers, rfq_id)
+    off = await api.patch("/api/v1/integrations/llm", admin_headers, json={"enabled": False})
+    if off.status_code != 200 or off.json()["enabled"] is not False:
+        fail("integration safety", f"disabling returned {off.status_code} {off.text[:200]}")
+    listing = await api.get("/api/v1/integrations", admin_headers)
+    llm = next(row for row in listing.json()["items"] if row["kind"] == "llm")
+    if llm["status"] != "disabled":
+        fail("integration safety", f"disabled integration still reports {llm['status']}")
+
+    calls = len(vendor.llm_calls)
+    reply = await api.post(f"/api/v1/rfqs/{rfq_id}/simulate-reply", buyer_headers, json={
+        "supplier_id": supplier_id, "unit_price": "19900", "lead_time_days": 20,
+        "validity_days": 14,
+    })
+    if reply.status_code >= 400:
+        fail("integration safety", reply.text[:300])
+    if len(vendor.llm_calls) != calls:
+        fail("integration safety", "the disabled provider was still called")
+    if await _anthropic_extractions(api, buyer_headers, rfq_id) != before:
+        fail("integration safety", "the extraction still claims a real model while the provider is off")
+
+    on = await api.patch("/api/v1/integrations/llm", admin_headers, json={"enabled": True})
+    if on.json()["enabled"] is not True:
+        fail("integration safety", "re-enabling failed")
+    await api.post(f"/api/v1/rfqs/{rfq_id}/simulate-reply", buyer_headers, json={
+        "supplier_id": supplier_id, "unit_price": "19800", "lead_time_days": 19,
+        "validity_days": 14,
+    })
+    if await _anthropic_extractions(api, buyer_headers, rfq_id) <= before:
+        fail("integration safety", "re-enabling did not restore the real model")
+    say("integration safety", "disabling falls back without calling the vendor; re-enabling restores it")
+
+
 async def journey_features(api: Api, admin_headers: dict[str, str], buyer_headers: dict[str, str],
                            rfq_id: str, supplier_id: str) -> None:
     caps = await api.get("/api/v1/channels/capabilities", admin_headers)
@@ -569,13 +682,15 @@ async def run(args: argparse.Namespace) -> None:
                     handles.append((socket_, pump))
                 say("websocket", "a live socket is open on each replica")
 
+                admin = await api_a.token("admin@pilot.procureai")
+                await journey_integrations(api_a, admin, vendor_url, vendor)
                 requester = await api_a.token("requester@nile.example.com")
                 rfq_id, supplier_id, rfq_code = await journey_rfq(api_a, requester, buyer)
                 await journey_whatsapp_out(api_a, buyer, rfq_id, supplier_id, vendor)
                 await journey_whatsapp_in(api_a, rfq_code, sockets)
                 await journey_llm(api_a, buyer, rfq_id, supplier_id, vendor)
-                admin = await api_a.token("admin@pilot.procureai")
                 await journey_features(api_a, admin, buyer, rfq_id, supplier_id)
+                await journey_integration_safety(api_a, admin, buyer, rfq_id, supplier_id, vendor)
                 _ = api_b  # replica B served the socket; its health is asserted above
             finally:
                 for socket_, pump in handles:

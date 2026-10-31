@@ -8,8 +8,8 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.base import registry
 from app.db.models.entities import DiscoveryCandidate, DiscoveryJob, Supplier, Tenant
+from app.services import integrations as integration_adapters
 from app.services.suppliers import create_supplier, find_duplicates, screen_sanctions
 
 log = logging.getLogger("procureai.discovery")
@@ -18,7 +18,7 @@ log = logging.getLogger("procureai.discovery")
 async def run_discovery(session: AsyncSession, tenant: Tenant, *, query: str, country: str = "EG",
                         category_code: str | None = None, max_results: int = 24,
                         requested_by: str | None = None) -> DiscoveryJob:
-    provider = registry.resolve("search")
+    provider = await integration_adapters.adapter_for(session, tenant, "search")
     job = DiscoveryJob(
         tenant_id=tenant.id, query=query, category_code=category_code, country=country,
         provider=getattr(provider, "name", "fake"), status="running", max_results=max_results,

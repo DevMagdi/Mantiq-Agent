@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -30,7 +29,6 @@ from app.db.models.entities import (
     Comment,
     DataErasureRequest,
     DiscoveryJob,
-    IntegrationConfig,
     Invoice,
     LlmProviderConfig,
     Notification,
@@ -314,80 +312,153 @@ async def revoke_api_key(key_id: str, ctx: Context = Depends(require("admin:api_
     return {"ok": True}
 
 
-@router.get("/integrations", summary="Integration configuration (secrets masked)")
+@router.get("/integrations", summary="Integration status, catalogue and masked secrets")
 async def list_integrations(ctx: Context = Depends(require("admin:integrations"))):
-    rows = list((await ctx.session.execute(
-        select(IntegrationConfig).where(IntegrationConfig.tenant_id == ctx.tenant_id)
-    )).scalars().all())
-    platform = {
-        "email": settings.email_provider, "whatsapp": settings.whatsapp_provider,
-        "telephony": settings.telephony_provider, "search": settings.search_provider,
-        "llm": settings.llm_provider, "erp": settings.erp_provider, "payment": settings.payment_provider,
-        "ocr": settings.ocr_provider, "stt": settings.stt_provider,
-    }
-    return {"items": [{"id": i.id, "kind": i.kind, "name": i.name, "config": i.config,
-                       "status": i.status, "last_tested_at": i.last_tested_at} for i in rows],
-            "platform_adapters": platform}
+    """Everything the Integrations screen renders: per-provider status, the field catalogue and masks.
+
+    The catalogue travels with the data so the UI never invents a field: adding a credential to a
+    provider is a backend change, and the screen follows it without a frontend release.
+    """
+    from app.services import integrations as integration_service
+
+    return await integration_service.snapshot(ctx.session, ctx.tenant)
+
+
+class IntegrationSaveIn(BaseModel):
+    provider: str = ""
+    config: dict = Field(default_factory=dict)
+    secrets: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+@router.put("/integrations/{kind}", summary="Save (and optionally enable) one integration")
+async def save_integration(kind: str, payload: IntegrationSaveIn,
+                           ctx: Context = Depends(require("admin:integrations"))):
+    from app.services import integrations as integration_service
+
+    try:
+        result = await integration_service.save(
+            ctx.session, ctx.tenant, kind, provider=payload.provider, config=payload.config,
+            secrets=payload.secrets, enabled=payload.enabled,
+        )
+    except ValueError as exc:
+        raise ValidationFailed(str(exc)) from exc
+    # The audit trail names the credential keys that changed, never their values.
+    await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.configured",
+                actor_id=ctx.user_id, actor_label=ctx.user.email,
+                entity_type="integration_config", entity_id=result["id"],
+                after={"kind": kind, "provider": result["provider"], "enabled": result["enabled"],
+                       "config_keys": sorted(payload.config.keys()), "missing": result["missing"]},
+                ip=ctx.ip, request_id=ctx.request_id)
+    if result["secrets_changed"]:
+        await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.secrets_updated",
+                    actor_id=ctx.user_id, actor_label=ctx.user.email,
+                    entity_type="integration_config", entity_id=result["id"],
+                    after={"kind": kind, "secrets": sorted(result["secrets_changed"])},
+                    ip=ctx.ip, request_id=ctx.request_id)
+    await ctx.session.commit()
+    snapshot = await integration_service.snapshot(ctx.session, ctx.tenant)
+    item = next(row for row in snapshot["items"] if row["kind"] == kind)
+    return {**item, "secrets_changed": result["secrets_changed"], "ok": not result["missing"]}
+
+
+@router.patch("/integrations/{kind}", summary="Enable or disable one integration")
+async def toggle_integration(kind: str, payload: dict = Body(...),
+                             ctx: Context = Depends(require("admin:integrations"))):
+    from app.services import integrations as integration_service
+
+    if "enabled" not in payload:
+        raise ValidationFailed("enabled is required")
+    try:
+        result = await integration_service.set_enabled(ctx.session, ctx.tenant, kind,
+                                                       bool(payload["enabled"]))
+    except ValueError as exc:
+        raise ValidationFailed(str(exc)) from exc
+    await audit(ctx.session, tenant_id=ctx.tenant_id,
+                action="integration.enabled" if result["enabled"] else "integration.disabled",
+                actor_id=ctx.user_id, actor_label=ctx.user.email, entity_type="integration_config",
+                entity_id=kind, after=result, ip=ctx.ip, request_id=ctx.request_id)
+    await ctx.session.commit()
+    return result
+
+
+@router.delete("/integrations/{kind}", summary="Remove a tenant integration (back to the platform adapter)")
+async def delete_integration(kind: str, ctx: Context = Depends(require("admin:integrations"))):
+    from app.services import integrations as integration_service
+
+    row = await integration_service._row(ctx.session, ctx.tenant_id, kind)  # noqa: SLF001 - same module boundary
+    if row is None:
+        raise NotFound("Integration not found.")
+    await ctx.session.delete(row)
+    await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.removed",
+                actor_id=ctx.user_id, actor_label=ctx.user.email, entity_type="integration_config",
+                entity_id=kind, after={"kind": kind}, ip=ctx.ip, request_id=ctx.request_id)
+    await ctx.session.commit()
+    if kind == "llm":
+        from app.agents.llm import clear_cache
+
+        clear_cache()
+    return {"ok": True, "kind": kind}
+
+
+@router.post("/integrations/{kind}/test", summary="Probe one integration with a real vendor call")
+async def test_integration(kind: str, ctx: Context = Depends(require("admin:integrations"))):
+    """One real call — SMTP login, Twilio account fetch, Meta phone-number read, LLM completion…
+
+    A fake provider is *not* reported as success: the answer is `status: sandbox` with `ok: false`,
+    because "the adapter resolved" is not the same thing as "the integration works".
+    """
+    from app.services import integrations as integration_service
+
+    try:
+        result = await integration_service.probe(ctx.session, ctx.tenant, kind)
+    except ValueError as exc:
+        raise ValidationFailed(str(exc)) from exc
+    await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.tested",
+                actor_id=ctx.user_id, actor_label=ctx.user.email, entity_type="integration_config",
+                entity_id=kind,
+                after={"kind": kind, "ok": result["ok"], "status": result["status"],
+                       "detail": result["detail"][:200], "latency_ms": result["latency_ms"]},
+                ip=ctx.ip, request_id=ctx.request_id)
+    await ctx.session.commit()
+    return result
 
 
 class IntegrationIn(BaseModel):
+    """Legacy shape kept for API clients: `POST /integrations` with a raw config blob."""
+
     kind: str
     name: str = ""
     config: dict = Field(default_factory=dict)
     secrets: dict = Field(default_factory=dict)
 
 
-@router.post("/integrations", status_code=201, summary="Configure an integration (secrets envelope-encrypted)")
+@router.post("/integrations", status_code=201, summary="Configure an integration (legacy shape)")
 async def upsert_integration(payload: IntegrationIn, ctx: Context = Depends(require("admin:integrations"))):
-    encrypted = ""
-    key_id = ""
-    if payload.secrets:
-        encrypted, key_id = await encrypt_text(ctx.session, ctx.tenant, json.dumps(payload.secrets))
-    row = (await ctx.session.execute(
-        select(IntegrationConfig).where(IntegrationConfig.tenant_id == ctx.tenant_id,
-                                        IntegrationConfig.kind == payload.kind)
-    )).scalar_one_or_none()
-    if row:
-        row.name = payload.name or row.name
-        row.config = payload.config
-        if encrypted:
-            row.secrets_enc, row.key_id = encrypted, key_id
-    else:
-        row = IntegrationConfig(tenant_id=ctx.tenant_id, kind=payload.kind, name=payload.name,
-                                config=payload.config, secrets_enc=encrypted, key_id=key_id)
-        ctx.session.add(row)
-    await ctx.session.flush()
-    await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.configured", actor_id=ctx.user_id,
-                actor_label=ctx.user.email, entity_type="integration_config", entity_id=row.id,
-                after={"kind": payload.kind, "config": payload.config})
+    from app.services import integrations as integration_service
+
+    try:
+        result = await integration_service.save(
+            ctx.session, ctx.tenant, payload.kind,
+            provider=str(payload.config.get("provider", "")), config=payload.config,
+            secrets=payload.secrets, enabled=True,
+        )
+    except ValueError as exc:
+        raise ValidationFailed(str(exc)) from exc
+    await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.configured",
+                actor_id=ctx.user_id, actor_label=ctx.user.email,
+                entity_type="integration_config", entity_id=result["id"],
+                after={"kind": payload.kind, "provider": result["provider"],
+                       "config_keys": sorted(payload.config.keys())},
+                ip=ctx.ip, request_id=ctx.request_id)
+    if result["secrets_changed"]:
+        await audit(ctx.session, tenant_id=ctx.tenant_id, action="integration.secrets_updated",
+                    actor_id=ctx.user_id, actor_label=ctx.user.email,
+                    entity_type="integration_config", entity_id=result["id"],
+                    after={"kind": payload.kind, "secrets": sorted(result["secrets_changed"])},
+                    ip=ctx.ip, request_id=ctx.request_id)
     await ctx.session.commit()
-    return {"id": row.id}
-
-
-@router.post("/integrations/{kind}/test", summary="Test an integration")
-async def test_integration(kind: str, ctx: Context = Depends(require("admin:integrations"))):
-    from app.adapters.base import registry as adapter_registry
-
-    if kind == "erp":
-        connector = adapter_registry.resolve("erp")
-        result = await connector.test_connection()
-        return {"ok": result.ok, "reference": result.reference, "error": result.error}
-    if kind == "email":
-        provider = adapter_registry.resolve("email")
-        email_address = ctx.tenant.settings.get("test_email") if ctx.tenant.settings else None
-        if not email_address:
-            return {"ok": True, "provider": provider.name, "note": "Provider resolved; supply SMTP env vars to send."}
-        result = await provider.send(to=email_address, subject="ProcureAI test", body="Integration test")
-        return {"ok": result.ok, "provider": provider.name, "error": result.error}
-    if kind == "llm":
-        from app.agents.llm import llm_for
-        from app.agents.llm.base import LLMMessage, LLMRequest
-
-        llm = await llm_for(ctx.session, ctx.tenant)
-        response = await llm.complete(LLMRequest(task="summary", messages=[LLMMessage("user", "ping")],
-                                                 context={"facts": {"ping": "pong"}}))
-        return {"ok": True, "provider": llm.name, "model": llm.model, "reply": response.text[:120]}
-    return {"ok": True, "kind": kind, "note": "No active probe for this integration."}
+    return result
 
 
 @router.get("/llm-config", summary="Per-tenant LLM provider (including self-hosted)")

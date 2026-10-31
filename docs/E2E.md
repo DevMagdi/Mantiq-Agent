@@ -18,11 +18,15 @@ The script builds its own environment and tears it down again:
 1. migrates a temporary database (`alembic upgrade head`), bootstraps and seeds the demo tenant;
 2. starts a real Redis (`redis-server`, from the `redislite` dev dependency or `PATH`);
 3. starts **two** uvicorn replicas on free ports, both pointed at that Redis and the same database;
-4. starts a vendor-side HTTP server that speaks the Twilio Messages API, the Anthropic Messages API
-   and the OpenAI chat-completions API;
-5. opens one WebSocket per replica and drives the journeys.
+4. starts a vendor-side HTTP server that speaks the Twilio Messages API (including the account
+   resource Twilio's own SDKs verify against), the Anthropic Messages API and the OpenAI
+   chat-completions API;
+5. leaves the *platform* on the fake providers (`WHATSAPP_PROVIDER/SMS_PROVIDER/TELEPHONY_PROVIDER/
+   LLM_PROVIDER=fake`) and no vendor secret in the environment, so every real call below can only
+   come from credentials saved through the Integrations screen;
+6. opens one WebSocket per replica and drives the journeys.
 
-It then asserts thirteen things, printing `PASS` per journey:
+It then asserts fifteen things, printing `PASS` per journey:
 
 * sign in, token refresh (single-use cookie), sign out revokes the refresh session;
 * requisition → clarification → submit → RFQ → dispatch;
@@ -32,7 +36,14 @@ It then asserts thirteen things, printing `PASS` per journey:
 * the resulting `offer.extracted` frame arrives on the socket of **both** replicas;
 * a supplier reply is extracted by the real LLM provider over HTTP (`anthropic:<model>` recorded);
 * `/channels/capabilities` reports the real provider;
-* turning the WhatsApp feature flag off makes the server refuse a send (`BLOCK_FEATURE_OFF`).
+* turning the WhatsApp feature flag off makes the server refuse a send (`BLOCK_FEATURE_OFF`);
+* **integrations**: a tenant administrator saves a real Anthropic key and Twilio credentials on the
+  Integrations screen — both adapters flip `sandbox`/`fake` → `live`, the secret is never echoed back
+  (only `••••` + the last four characters), both probes really hit the vendor (the Twilio probe
+  authenticates against `/2010-04-01/Accounts/{sid}.json`), and a reload still hides the secret;
+* **integration safety**: `PATCH enabled:false` makes the adapter `disabled` and the next supplier
+  reply is extracted with **no** vendor call and no `anthropic:` model recorded, then re-enabling
+  restores the real provider.
 
 Options: `--database-url postgresql+asyncpg://…` to use PostgreSQL, `--redis-url redis://…` to use an
 existing Redis, `--keep` to keep the temporary database for inspection.
@@ -60,6 +71,7 @@ What the specs cover:
 | `auth.spec.ts` | sign-in form, wrong password, anonymous redirect, sign-out, Arabic (RTL) default and the English switch |
 | `screens.spec.ts` | all 16 navigable routes mount without a console error or an error boundary, per role |
 | `realtime.spec.ts` | the session token opens an authenticated socket, `connected` then `pong`, and an invalid token is closed with `4401` |
+| `integrations.spec.ts` | the Integrations screen renders real per-provider fields (no JSON textarea), an incomplete save reports `Error` with the missing field names, and enable/disable round-trips through the API |
 
 `npm run e2e:typecheck` compiles the suite under the project's strict TypeScript settings and runs in
 CI, so the specs cannot rot silently even where browsers are unavailable.
