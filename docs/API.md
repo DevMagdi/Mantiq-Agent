@@ -147,6 +147,14 @@ The accounting module is the only place where a purchase becomes a number. Every
 permission-gated (`accounting:read|write|post|reverse`, `cost:read|write`, `audit_package:read|review`)
 and **no endpoint moves money**: `payment_method` on an invoice is a *suggestion*, not an execution.
 
+> **Optional module.** With `ACCOUNTING_ENABLED=false` (the pilot default) this whole section does not
+> exist: the router is not mounted, so every path below answers the app's ordinary `404` — byte-for-byte
+> the same body an unknown URL returns — and none of them appears in `/api/openapi.json`. The
+> accounting permissions are also stripped from `/auth/me`. The two supplier-ledger routes
+> (`/supplier-balances`, `/suppliers/{id}/balance`) and `/purchase-orders/{id}/lifecycle` moved into
+> this module for exactly that reason. Nothing is deleted: set the variable to `true` and the surface
+> returns unchanged.
+
 ```bash
 # 0. the eleven-stage rail and its written history
 GET  /api/v1/purchase-orders/{po_id}/lifecycle

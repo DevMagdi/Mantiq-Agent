@@ -527,3 +527,29 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     secret in the environment. Any `live` status or vendor call in that run therefore has exactly one
     possible origin: the credentials PUT through `/integrations/{kind}`. A probe that only checks
     "the fields are non-empty" would have passed while the product was broken.
+119. **Accounting is a deployment switch, not a tenant flag.** The pilot must not show a trace of it,
+    so `ACCOUNTING_ENABLED` lives in `Settings` and is resolved when the router is assembled:
+    `build_api_router(accounting_enabled=…)` simply does not include the accounting router, which is
+    why the paths are absent from `/api/openapi.json` (verified in
+    `tests/test_accounting_hidden.py`) rather than answering a 403 or a `BLOCK_FEATURE_OFF` that
+    would advertise the module. A tenant administrator therefore cannot discover — let alone
+    enable — it. The two supplier-ledger routes and the P2P lifecycle route moved out of `orders.py`
+    into the accounting module for the same reason: leaving them behind would have kept four paths
+    in the schema that only the accounting module can answer.
+120. **The hidden module loses its permissions, not its matrix.** `core.rbac.visible_permissions()`
+    removes `accounting:*`, `cost:*`, `ledger:read` and `audit_package:*` from the effective set at
+    the one place `Context` is built, so `/auth/me`, the sidebar, every `require()` and every
+    capability-driven card agree without a second source of truth. The RBAC matrix itself is
+    untouched — flipping the switch restores the same roles.
+121. **The auditor package is not assembled when accounting is off.** `receiving.confirm` used to seal
+    a package on every delivery confirmation. Its purpose is to gate the invoice into accounting, and
+    with the module off both the review route and the journal it lists are 404 — a bundle nobody can
+    review and a PO parked at "ready for audit" forever. So the call is skipped, the receipt and the
+    confirmation are unaffected, and the P2P rail (`p2p.stages()`) ends at "confirmed by requester".
+    Recorded stage rows are never rewritten, so the history of a tenant that later enables accounting
+    is intact.
+122. **The pilot ships the AI-voice surfaces off.** `VOICE_AI_ENABLED` and `VOICE_ASSISTANT_ENABLED`
+    default to `false` because the pilot plays a scripted transcript — there is no live audio path in
+    the product today. Nothing was removed: the endpoints, the flags and their tests still exist, and
+    an operator can turn them on; `tests/test_api_feature_flags.py` pins the shipped defaults so the
+    claim in `docs/PROGRESS.md` cannot drift.

@@ -98,6 +98,24 @@ READ_ONLY_REQUESTER = {
     "assistant:use",
 }
 
+#: Permissions that only exist to drive the (optional) accounting module. When the deployment switch
+#: `ACCOUNTING_ENABLED` is off they are stripped from every caller's effective set, so no menu, button
+#: or API response can depend on them — without touching the RBAC matrix itself.
+ACCOUNTING_PERMISSIONS: frozenset[str] = frozenset({
+    "accounting:read", "accounting:write", "accounting:post", "accounting:reverse",
+    "cost:read", "cost:write", "ledger:read", "audit_package:read", "audit_package:review",
+})
+
+
+def visible_permissions(permissions: set[str] | frozenset[str]) -> set[str]:
+    """Drop the accounting permissions when the module is switched off for this deployment."""
+    from app.core.config import settings
+
+    if settings.accounting_enabled:
+        return set(permissions)
+    return {p for p in permissions if p not in ACCOUNTING_PERMISSIONS}
+
+
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "superadmin": set(ALL_PERMISSIONS),
     "admin": set(ALL_PERMISSIONS) - {"platform:tenants", "platform:impersonate"},

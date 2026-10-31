@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models.entities import (
     RFQ,
     Approval,
@@ -48,6 +49,12 @@ STAGES: tuple[tuple[str, str, str], ...] = (
     ("posted_to_accounts", "Posted to accounts", "مُرحّل للحسابات"),
 )
 
+#: The stages that only exist because there is an accounting module behind them. With
+#: `ACCOUNTING_ENABLED` off they are removed from the rail entirely, so a pilot order's lifecycle ends
+#: at "confirmed by requester" and never promises a review nobody can perform. The rows already
+#: written to `p2p_stage_event` are kept: the transition history stays append-only.
+ACCOUNTING_STAGES: tuple[str, ...] = ("ready_for_audit", "posted_to_accounts")
+
 STAGE_INDEX = {code: index for index, (code, _, _) in enumerate(STAGES)}
 STAGE_LABELS = {code: (en, ar) for code, en, ar in STAGES}
 
@@ -68,6 +75,17 @@ NEXT_ACTION = {
 }
 
 
+def stages() -> tuple[tuple[str, str, str], ...]:
+    """The stages this deployment shows: all eleven, or nine when accounting is switched off."""
+    if settings.accounting_enabled:
+        return STAGES
+    return tuple(row for row in STAGES if row[0] not in ACCOUNTING_STAGES)
+
+
+def stage_index(code: str) -> int:
+    return {row[0]: index for index, row in enumerate(stages())}.get(code, -1)
+
+
 async def evidence(session: AsyncSession, po: PurchaseOrder) -> dict:
     """Everything the stage derivation needs, in one round of queries."""
     rfq = (await session.execute(select(RFQ).where(RFQ.id == po.rfq_id))).scalar_one_or_none()
@@ -85,13 +103,18 @@ async def evidence(session: AsyncSession, po: PurchaseOrder) -> dict:
     invoices = list((await session.execute(
         select(SupplierInvoice).where(SupplierInvoice.po_id == po.id).order_by(SupplierInvoice.created_at)
     )).scalars().all())
-    package = (await session.execute(
-        select(AuditPackage).where(AuditPackage.po_id == po.id).order_by(AuditPackage.created_at.desc())
-    )).scalars().first()
-    posted = (await session.execute(
-        select(JournalEntry.id).where(JournalEntry.po_id == po.id, JournalEntry.source_type == "invoice",
-                                      JournalEntry.status == "posted").limit(1)
-    )).scalar_one_or_none()
+    package = None
+    posted = None
+    if settings.accounting_enabled:
+        package = (await session.execute(
+            select(AuditPackage).where(AuditPackage.po_id == po.id)
+            .order_by(AuditPackage.created_at.desc())
+        )).scalars().first()
+        posted = (await session.execute(
+            select(JournalEntry.id).where(JournalEntry.po_id == po.id,
+                                          JournalEntry.source_type == "invoice",
+                                          JournalEntry.status == "posted").limit(1)
+        )).scalar_one_or_none()
     return {"pr": pr, "rfq": rfq, "offers": offers, "approvals": approvals, "receipts": receipts,
             "invoices": invoices, "package": package, "posted_invoice_entry": posted}
 
@@ -125,9 +148,9 @@ def derive_stage(data: dict, po: PurchaseOrder | None = None) -> str:
             reached = "received_by_warehouse"
         if confirmed:
             reached = "confirmed_by_requester"
-        if data["package"] is not None:
+        if data["package"] is not None and "ready_for_audit" in {row[0] for row in stages()}:
             reached = "ready_for_audit"
-        if data["posted_invoice_entry"]:
+        if data["posted_invoice_entry"] and "posted_to_accounts" in {row[0] for row in stages()}:
             reached = "posted_to_accounts"
     return reached
 
@@ -142,12 +165,18 @@ async def lifecycle(session: AsyncSession, tenant_id: str, po: PurchaseOrder, *,
     events = {row.stage: row for row in (await session.execute(
         select(P2PStageEvent).where(P2PStageEvent.tenant_id == tenant_id, P2PStageEvent.po_id == po.id)
     )).scalars().all()}
-    current_index = STAGE_INDEX[current]
-    stages = []
-    for code, label_en, label_ar in STAGES:
-        index = STAGE_INDEX[code]
+    visible = stages()
+    current_index = stage_index(current)
+    if current_index < 0:
+        # A stage recorded by an earlier deployment that the rail no longer shows: clamp to the last
+        # visible one so the summary never claims a step nobody can see.
+        current = visible[-1][0]
+        current_index = len(visible) - 1
+    rows = []
+    for code, label_en, label_ar in visible:
+        index = stage_index(code)
         event = events.get(code)
-        stages.append({
+        rows.append({
             "code": code, "label_en": label_en, "label_ar": label_ar,
             "order": index,
             "state": "done" if index < current_index else ("current" if index == current_index else "pending"),
@@ -159,7 +188,7 @@ async def lifecycle(session: AsyncSession, tenant_id: str, po: PurchaseOrder, *,
         "po_id": po.id, "current": current,
         "current_label_en": STAGE_LABELS[current][0], "current_label_ar": STAGE_LABELS[current][1],
         "next_action_en": action_en, "next_action_ar": action_ar,
-        "stages": stages,
+        "stages": rows,
         "history": [{"stage": row.stage, "reached_at": row.reached_at, "actor_id": row.actor_id,
                      "source": row.source, "evidence": row.evidence or {}} for row in
                     sorted(events.values(), key=lambda row: row.reached_at)],
@@ -175,7 +204,7 @@ async def record_stage(session: AsyncSession, tenant_id: str, po: PurchaseOrder,
     existing = {row.stage for row in (await session.execute(
         select(P2PStageEvent).where(P2PStageEvent.tenant_id == tenant_id, P2PStageEvent.po_id == po.id)
     )).scalars().all()}
-    for code, _, _ in STAGES[: STAGE_INDEX[stage] + 1]:
+    for code, _, _ in stages()[: stage_index(stage) + 1]:
         if code in existing:
             continue
         session.add(P2PStageEvent(
@@ -200,5 +229,5 @@ async def stage_summary(session: AsyncSession, tenant_id: str, po: PurchaseOrder
     data = await evidence(session, po)
     stage = derive_stage(data, po)
     return {"stage": stage, "label_en": STAGE_LABELS[stage][0], "label_ar": STAGE_LABELS[stage][1],
-            "ready_for_audit": data["package"] is not None,
-            "posted": bool(data["posted_invoice_entry"])}
+            "ready_for_audit": settings.accounting_enabled and data["package"] is not None,
+            "posted": bool(settings.accounting_enabled and data["posted_invoice_entry"])}

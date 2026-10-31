@@ -24,6 +24,15 @@ os.environ.update({
     "SECRET_KEY": "test-secret-key-not-for-production-0123456789abcdef",
     "BOOTSTRAP_ON_START": "false",
     "RATE_LIMIT_ENABLED": "false",
+    # Accounting is off by default for a pilot deployment, and the suite keeps the *default* app with
+    # the module switched on so the phase-2 behaviour stays covered. The tests that prove the hidden
+    # mode build their own app with `create_app(accounting_enabled=False)` and flip this setting too.
+    "ACCOUNTING_ENABLED": "true",
+    # The pilot ships the AI-voice surfaces off (they play a scripted transcript, there is no live
+    # audio). The suite turns them on so the phase-3 voice coverage keeps running; the *default* is
+    # asserted separately in tests/test_api_feature_flags.py.
+    "VOICE_AI_ENABLED": "true",
+    "VOICE_ASSISTANT_ENABLED": "true",
     "PUBLIC_BASE_URL": "http://testserver",
     # The suite must not depend on when it runs: the contact-hours rule has its own
     # explicit-clock tests (tests/test_policy_engine.py, tests/test_services_negotiation.py).

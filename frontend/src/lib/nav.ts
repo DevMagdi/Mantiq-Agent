@@ -23,6 +23,15 @@ import { PERM } from "./permissions";
 export type NavItem = { to: string; key: string; icon: LucideIcon; permission: string };
 export type NavGroup = { id: string; labelKey: string; items: NavItem[] };
 
+/**
+ * Groups that vanish completely when a capability is off for this deployment.
+ *
+ * `accounting` is not a permission a pilot user lacks — it is a module the API does not serve at
+ * all when ACCOUNTING_ENABLED=false, and the backend strips its permissions. Filtering here too keeps
+ * the sidebar honest even if a stale capability is ever cached in the browser.
+ */
+export const HIDDEN_GROUPS: Record<string, string> = { accounting: PERM.accountingRead };
+
 /** Grouped so a newcomer reads the product as three jobs: buy, receive, measure. */
 export const NAV_GROUPS: NavGroup[] = [
   {

@@ -2,7 +2,7 @@ import { ChevronsLeft, ChevronsRight, LogOut } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
-import { NAV_GROUPS } from "@/lib/nav";
+import { HIDDEN_GROUPS, NAV_GROUPS } from "@/lib/nav";
 import { cn } from "./ui";
 import { Brand } from "./Brand";
 
@@ -40,9 +40,15 @@ export function Sidebar({
   const { t } = useTranslation();
   const groups = useMemo(
     () =>
-      NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => can(item.permission)) })).filter(
-        (group) => group.items.length > 0,
-      ),
+      NAV_GROUPS
+        // A group whose module is switched off for the deployment is dropped before its items are
+        // filtered, so no header or empty section leaks the module's existence.
+        .filter((group) => {
+          const required = HIDDEN_GROUPS[group.id];
+          return !required || can(required);
+        })
+        .map((group) => ({ ...group, items: group.items.filter((item) => can(item.permission)) }))
+        .filter((group) => group.items.length > 0),
     [can],
   );
 

@@ -197,6 +197,14 @@ async def seed_tenant_defaults(session: AsyncSession, tenant: Tenant) -> dict:
 
     created["accounts"] = 0
     created["cost_centers"] = 0
+    # Accounting is optional per deployment. With `ACCOUNTING_ENABLED=false` nothing here runs: a
+    # pilot tenant gets no chart of accounts and no cost centres, so there is no half-configured
+    # ledger to stumble into. The code and the tables are kept for when the module is switched on.
+    if not settings.accounting_enabled:
+        created["accounting"] = False
+        return await _seed_remaining(session, tenant, created)
+
+    created["accounting"] = True
     from app.services.accounting import ACCOUNTS, UNALLOCATED_CENTER, ensure_account, ensure_cost_center
 
     for code, name, name_ar, kind, normal, control in ACCOUNTS:
@@ -216,6 +224,11 @@ async def seed_tenant_defaults(session: AsyncSession, tenant: Tenant) -> dict:
                                  description="Default dimension until a real cost centre is chosen.")
         created["cost_centers"] += 1
 
+    return await _seed_remaining(session, tenant, created)
+
+
+async def _seed_remaining(session: AsyncSession, tenant: Tenant, created: dict) -> dict:
+    """Everything a tenant needs regardless of the accounting switch; ends by flushing."""
     sub = (await session.execute(select(Subscription).where(Subscription.tenant_id == tenant.id))).scalars().first()
     if not sub:
         session.add(Subscription(tenant_id=tenant.id, plan_code=tenant.plan_code, status="active", seats=10,

@@ -27,6 +27,20 @@ import PublicFormPage from "./pages/PublicFormPage";
 import PublicPortalPage from "./pages/PublicPortalPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
+/**
+ * A screen that only exists when the deployment has the capability behind it.
+ *
+ * Accounting is a deployment-level switch, not a tenant permission: when it is off the API has no
+ * accounting route at all, so the three screens must behave exactly like an unknown URL — the normal
+ * 404 — instead of a permission panel or a "coming soon" placeholder. The flag arrives through the
+ * existing capability mechanism (`/auth/me` → permissions), so one build serves both modes.
+ */
+function CapabilityRoute({ permission, children }: { permission: string; children: ReactNode }) {
+  const { can } = useAuth();
+  if (!can(permission)) return <NotFoundPage />;
+  return <>{children}</>;
+}
+
 function Protected({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const location = useLocation();
@@ -98,20 +112,21 @@ export default function App() {
               <SuppliersPage />
             </RequirePermission>
           } />
+        {/* Hidden with ACCOUNTING_ENABLED=false: a 404, exactly like an unknown URL. */}
         <Route path="/accounting" element={
-            <RequirePermission permission={PERM.accountingRead}>
+            <CapabilityRoute permission={PERM.accountingRead}>
               <JournalPage />
-            </RequirePermission>
+            </CapabilityRoute>
           } />
         <Route path="/accounting/reports" element={
-            <RequirePermission permission={PERM.costRead}>
+            <CapabilityRoute permission={PERM.costRead}>
               <AccountingReportsPage />
-            </RequirePermission>
+            </CapabilityRoute>
           } />
         <Route path="/accounting/setup" element={
-            <RequirePermission permission={PERM.accountingRead}>
+            <CapabilityRoute permission={PERM.accountingRead}>
               <AccountingSetupPage />
-            </RequirePermission>
+            </CapabilityRoute>
           } />
         <Route path="/analytics" element={
             <RequirePermission permission={PERM.reportRead}>

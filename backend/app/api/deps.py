@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Forbidden, Unauthorized
-from app.core.rbac import permissions_for
+from app.core.rbac import permissions_for, visible_permissions
 from app.core.security import decode_token
 from app.db.models.entities import Tenant, User
 from app.db.session import get_session
@@ -90,7 +90,9 @@ async def current_context(
     request.state.user = user
 
     roles = list(user.roles or [])
-    perms = permissions_for(roles, user.is_superadmin)
+    # Accounting permissions are removed when the module is switched off for this deployment
+    # (A6): the UI then has nothing to show and no route can be guessed into a 403.
+    perms = visible_permissions(permissions_for(roles, user.is_superadmin))
     return Context(user=user, tenant=tenant, session=session, request=request, permissions=perms)
 
 

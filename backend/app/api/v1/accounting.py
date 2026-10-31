@@ -445,6 +445,29 @@ async def supplier_account(supplier_id: str, ctx: Context = Depends(require("led
     return {**account, "balance": balance}
 
 
+# ------------------------------------------------------------------ supplier ledger
+# Moved here from `orders.py`: the supplier sub-ledger is accounting data, so the routes must
+# disappear with the rest of the module when ACCOUNTING_ENABLED is off (including from OpenAPI).
+@router.get("/supplier-balances", summary="Outstanding balance per supplier")
+async def supplier_balances(ctx: Context = Depends(require("ledger:read"))):
+    rows = await invoicing.supplier_balances(ctx.session, ctx.tenant)
+    outstanding = sum((Decimal(row["outstanding"]) for row in rows), Decimal("0"))
+    overdue = sum((Decimal(row["overdue"]) for row in rows), Decimal("0"))
+    return {"items": rows, "total_outstanding": str(numbers.money(outstanding)),
+            "total_overdue": str(numbers.money(overdue)), "currency": ctx.tenant.currency}
+
+
+@router.get("/suppliers/{supplier_id}/balance", summary="Ledger and balance for one supplier")
+async def supplier_balance(supplier_id: str, ctx: Context = Depends(require("ledger:read"))):
+    supplier = (await ctx.session.execute(
+        select(Supplier).where(Supplier.id == supplier_id, Supplier.tenant_id == ctx.tenant_id)
+    )).scalar_one_or_none()
+    if not supplier:
+        raise NotFound("Supplier not found.")
+    balance = await invoicing.supplier_balance(ctx.session, ctx.tenant_id, supplier.id)
+    return {**balance, "supplier_name": supplier.name, "supplier_name_ar": supplier.name_ar}
+
+
 # ------------------------------------------------------------------ auditor document package
 class PackageIn(BaseModel):
     invoice_id: str | None = None

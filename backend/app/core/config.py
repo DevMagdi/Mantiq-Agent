@@ -84,8 +84,11 @@ class Settings(BaseSettings):
     # Phase 3 channel + AI-voice master switches. Both layers must agree: this global switch AND
     # the tenant feature flag (tenant.settings["features"]) before a channel or AI feature is used.
     whatsapp_enabled: bool = True
-    voice_ai_enabled: bool = True
-    voice_assistant_enabled: bool = True
+    # Pilot defaults: the AI-voice surfaces play a scripted, pre-recorded transcript (there is no live
+    # audio in the pilot), so both are off unless an operator opts in. Nothing was deleted: setting
+    # these to true restores the phase-3 behaviour exactly.
+    voice_ai_enabled: bool = False
+    voice_assistant_enabled: bool = False
     whatsapp_daily_cap: int = 400
     whatsapp_session_window_hours: int = 24
     telephony_provider: str = "fake"  # fake | twilio
@@ -112,6 +115,13 @@ class Settings(BaseSettings):
     payment_provider: str = "fake"  # fake | stripe
     stripe_key: str = ""
     erp_provider: str = "file"  # file | odoo
+
+    # --- accounting module ---
+    # A deployment-level switch, deliberately *not* a tenant feature flag: when it is off the
+    # accounting surface does not exist at all (no router, no OpenAPI paths, no permissions, no
+    # journal side effects), and a tenant administrator has no way to discover or enable it. The
+    # code, the tables and the migrations are kept; turning this on restores phase-2 behaviour.
+    accounting_enabled: bool = False
 
     # --- security ---
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
