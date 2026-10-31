@@ -141,6 +141,10 @@ jobs:
       - name: Concurrent double-submits cannot corrupt the books
         env:
           RATE_LIMIT_ENABLED: "false"
+          # This proof is *about* the accounting module (posting, invoice payment, approval decision),
+          # and the module ships hidden behind a deployment switch. The switch is turned on here
+          # explicitly, exactly as the accounting test modules do, rather than weakening the check.
+          ACCOUNTING_ENABLED: "true"
         run: |
           uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level warning &
           for attempt in $(seq 1 30); do

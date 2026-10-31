@@ -23,6 +23,10 @@ Pass criteria (exit code 1 if any fails):
     5xx responses     0
 
 Run it against PostgreSQL 16 — the supported database — not the SQLite fallback.
+
+The endpoint mix includes the accounting module, which a pilot deployment hides behind
+``ACCOUNTING_ENABLED=false``. Run the server under test with ``ACCOUNTING_ENABLED=true`` (and seed it
+with ``procureai seed-demo``) or the accounting paths answer 404 and the mix is not representative.
 """
 from __future__ import annotations
 
