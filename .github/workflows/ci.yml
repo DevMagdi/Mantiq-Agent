@@ -133,6 +133,17 @@ jobs:
       - name: Tenant isolation is enforced by RLS
         run: python ../scripts/verify_rls.py
 
+      - name: Concurrent double-submits cannot corrupt the books
+        env:
+          RATE_LIMIT_ENABLED: "false"
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level warning &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then break; fi
+            sleep 1
+          done
+          python ../scripts/concurrency_check.py --base-url http://127.0.0.1:8000
+
   frontend:
     name: Frontend (typecheck, lint, tests, build)
     runs-on: ubuntu-latest

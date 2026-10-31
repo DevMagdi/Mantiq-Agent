@@ -13,6 +13,7 @@ from app.core.audit import audit
 from app.core.config import settings
 from app.core.errors import Conflict, Forbidden, NotFound
 from app.core.rate_limit import check as rate_check
+from app.core.rate_limit import enforce_login as rate_login
 from app.core.rbac import ALL_PERMISSIONS, ROLE_PERMISSIONS, ROLES, permissions_for
 from app.core.security import hash_password, password_policy_errors
 from app.db.models.entities import ApprovalLimit, Role, Tenant, User
@@ -67,7 +68,7 @@ class ResetConfirmIn(BaseModel):
 @router.post("/auth/login", summary="Email + password sign-in (TOTP challenge when enabled)")
 async def login(payload: LoginIn, request: Request, response: Response,
                 session: AsyncSession = Depends(get_session_dep)):
-    rate_check(f"login:{request.client.host if request.client else 'unknown'}", 20)
+    rate_login(request.client.host if request.client else "", payload.email)
     result = await auth_service.login(
         session, email=payload.email, password=payload.password, tenant_slug=payload.tenant_slug,
         user_agent=request.headers.get("user-agent", ""), ip=request.client.host if request.client else "",

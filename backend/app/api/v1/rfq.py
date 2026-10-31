@@ -827,6 +827,9 @@ async def decide(approval_id: str, payload: DecisionIn, ctx: Context = Depends(r
     result = await approval_decide(ctx.session, ctx.tenant, approval, decision=payload.decision,
                                    comment=payload.comment, user=ctx.user,
                                    split=payload.split if payload.decision == "split_award" else None)
+    if not result.get("ok"):
+        # A second decision on an already-decided step must not look like success to the UI.
+        raise ValidationFailed(result.get("error") or "This approval can no longer be decided.")
     await audit(ctx.session, tenant_id=ctx.tenant_id, action=f"approval.{payload.decision}",
                 actor_id=ctx.user_id, actor_label=ctx.user.email, entity_type="approval",
                 entity_id=approval.id, after={"result": result, "comment": payload.comment}, ip=ctx.ip,

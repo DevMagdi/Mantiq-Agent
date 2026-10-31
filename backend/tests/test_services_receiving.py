@@ -312,3 +312,38 @@ async def test_rfq_target_price_is_carried_into_the_po_via_the_offer():
         if po is None:
             return
         assert all(Decimal(line["unit_price"]) > 0 for line in po.lines)
+
+
+async def test_two_deliveries_cannot_add_up_to_more_than_was_ordered():
+    """Cumulative over-receipt is refused, even when each receipt looks small on its own.
+
+    Found in phase 4: validation compared each receipt with the *ordered* quantity, so two
+    receipts of 60 % and 50 % were both accepted and the order ended up 110 % delivered.
+    """
+    async with SessionLocal() as session:
+        tenant = await _tenant(session)
+        buyer, _requester = await _users(session, tenant)
+        po = await _fresh_po(session, tenant)
+        line = receiving.po_lines(po)[0]
+        ordered = line["quantity"]
+
+        almost_all = (ordered - Decimal("1")).quantize(Decimal("0.01"))
+        first = await receiving.create_receipt(
+            session, tenant, po, received_by=buyer.id,
+            lines=[{"line_no": line["line_no"], "received_qty": str(almost_all),
+                    "accepted_qty": str(almost_all)}])
+        assert first["ok"] is True
+        # Not even confirmed yet — the goods are physically there, so the guard already counts them.
+        second = await receiving.create_receipt(
+            session, tenant, po, received_by=buyer.id,
+            lines=[{"line_no": line["line_no"], "received_qty": "2", "accepted_qty": "2"}])
+        assert second["ok"] is False
+        assert second["issues"][0]["code"] == "OVER_RECEIPT"
+        assert "already received" in second["issues"][0]["message"]
+
+        # The remaining single unit is still accepted, so the guard does not block a valid top-up.
+        top_up = await receiving.create_receipt(
+            session, tenant, po, received_by=buyer.id,
+            lines=[{"line_no": line["line_no"], "received_qty": "1", "accepted_qty": "1"}])
+        assert top_up["ok"] is True, top_up
+        await session.rollback()

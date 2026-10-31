@@ -20,7 +20,7 @@ from app.db.models.entities import (
     User,
 )
 from app.services import numbers
-from app.services.common import notify, notify_role
+from app.services.common import lock_for_update, notify, notify_role
 from app.services.po import create_po_for_offer
 
 log = logging.getLogger("procureai.approval")
@@ -97,6 +97,9 @@ async def request_approval(session: AsyncSession, tenant: Tenant, rfq: RFQ, *, o
 async def decide(session: AsyncSession, tenant: Tenant, approval: Approval, *, decision: str,
                  comment: str, user: User, split: list[dict] | None = None) -> dict:
     """decision: approve | reject | request_revision | split_award."""
+    locked = await lock_for_update(session, Approval, approval.id, tenant_id=tenant.id)
+    if locked is not None:
+        approval = locked
     if approval.status not in {"pending", "revision_requested"}:
         return {"ok": False, "error": f"Approval is '{approval.status}', not pending."}
     rfq = (await session.execute(select(RFQ).where(RFQ.id == approval.rfq_id))).scalar_one()

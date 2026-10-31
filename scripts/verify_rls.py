@@ -38,6 +38,27 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         failures.append(name)
 
 
+async def _assert_isolation(conn, tenants: list[str], table: str) -> None:
+    """Prove isolation by identity, not by row count.
+
+    Counting rows only proves something when the second tenant happens to own none of them, and a
+    tenant that owns an identically sized dataset (each tenant gets the same chart of accounts)
+    trips a false failure. So: pick a row that belongs to tenant A, then look for *that row* while
+    tenant B is set.
+    """
+    await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+    total = await conn.fetchval(f"SELECT count(*) FROM {table}")
+    sample = await conn.fetchval(f"SELECT id::text FROM {table} LIMIT 1")
+    if sample is None:
+        check(f"{table} is tenant-isolated", True, "no rows yet — nothing to leak")
+        return
+    await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[1])
+    leaked = await conn.fetchval(f"SELECT count(*) FROM {table} WHERE id::text = $1", sample)
+    await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
+    check(f"{table} is tenant-isolated", leaked == 0,
+          f"own rows {total}, sample row visible to another tenant: {leaked}")
+
+
 async def _create_probe_tenant(conn: asyncpg.Connection) -> str:
     """Insert a disposable second tenant, filling every NOT NULL column explicitly."""
     required = await conn.fetch(
@@ -141,14 +162,8 @@ async def main() -> int:
         # for the application role: a posted ledger can only be corrected by a reversing entry.
         accounting_tables = ("gl_account", "cost_center", "journal_entry", "journal_line",
                              "cost_allocation", "audit_package", "p2p_stage_event")
-        await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
         for table in accounting_tables:
-            own_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
-            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[1])
-            foreign_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
-            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
-            check(f"{table} is tenant-isolated", foreign_rows == 0,
-                  f"{own_rows} own row(s), {foreign_rows} visible to another tenant")
+            await _assert_isolation(conn, tenants, table)
 
         append_only = {"journal_line": "debit", "cost_allocation": "amount", "p2p_stage_event": "source"}
         for table, column in append_only.items():
@@ -171,13 +186,7 @@ async def main() -> int:
         # edited is not an audit trail.
         channel_tables = ("channel_event", "voice_call_turn", "assistant_session", "assistant_turn")
         for table in channel_tables:
-            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
-            own_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
-            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[1])
-            foreign_rows = await conn.fetchval(f"SELECT count(*) FROM {table}")
-            await conn.execute("SELECT set_config('app.tenant_id', $1, false)", tenants[0])
-            check(f"{table} is tenant-isolated", foreign_rows == 0,
-                  f"{own_rows} own row(s), {foreign_rows} visible to another tenant")
+            await _assert_isolation(conn, tenants, table)
 
         channel_append_only = {"channel_event": "kind", "voice_call_turn": "decision",
                                "assistant_turn": "role"}

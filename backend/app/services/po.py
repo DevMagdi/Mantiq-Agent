@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.base import registry
+from app.core.audit import audit
 from app.db.models.entities import (
     RFQ,
     Offer,
@@ -53,6 +54,11 @@ async def create_po_for_offer(session: AsyncSession, tenant: Tenant, rfq: RFQ, o
     po.document_html = render_po_html(tenant, rfq, supplier, po)
     session.add(po)
     await session.flush()
+    # The issue of a purchase order is a status transition of its own and must be in the trail.
+    await audit(session, tenant_id=tenant.id, action="po.issued", actor_id=created_by,
+                entity_type="purchase_order", entity_id=po.id,
+                after={"code": po.code, "amount": str(amount), "currency": po.currency,
+                       "supplier_id": supplier.id, "rfq_id": rfq.id, "share": str(share)})
     await notify(session, tenant_id=tenant.id, user_id=rfq.buyer_id, kind="po_created",
                  title=f"PO {po.code} issued to {supplier.name}",
                  title_ar=f"تم إصدار أمر شراء {po.code} للمورد {supplier.name}",

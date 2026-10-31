@@ -12,8 +12,8 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (659 backend tests, 74 frontend tests) and coverage are reproduced in
-`docs/PR_DESCRIPTION.md`.
+Test counts (672 backend tests, 74 frontend tests) and coverage are reproduced in
+`docs/PR_PHASE4.md`.
 
 ## Functional requirements
 
@@ -92,7 +92,10 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | 2.2 | Internal assistant for requester/buyer/manager/warehouse/finance: PR create/clarify, P2P status, offer/recommendation summaries, balances, comms history; RBAC-strict, audited, unable to approve/award/sign/post | `assistant.classify/ask`, `INTENT_PERMISSIONS`, `_ownership_ok`, `FORBIDDEN_PATTERNS`, `assistant_session/turn` | `tests/test_services_assistant.py` (11: per-role scoping, forbidden verbs, read-only guarantees), `tests/test_api_channels.py`, `frontend/src/pages/AssistantPage.tsx` | Done |
 | 3 | Template library (AR+EN) for WhatsApp/email/voice, reminders on the preferred channel, per-supplier comm status (sent/delivered/replied/no response), mid-conversation channel switch with history preserved, logging/search, consent + opt-out per channel | `catalog_data.DEFAULT_TEMPLATES` (20 rows), `channels.refresh_comm_status`, `channels.switch_channel`, `inbox.search`, `OptInRegistry` | `tests/test_services_reminders_templates.py` (8), `tests/test_services_channels.py`, `tests/test_services_whatsapp.py`, `frontend/src/pages/TemplatesPage.tsx` | Done |
 | 4 (technical) | Built on the existing adapters; WhatsApp first-class; full AR RTL + EN including templates and voice prompts; everything audited; feature flags for AI voice; clean RBAC; UX for channel choice and the inbox | `features.py`, migration `0016` (RLS + append-only), `app/core/rbac.py`, `frontend/src/pages/{InboxPage,SettingsPage}.tsx` | `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off`, `tests/test_frontend_permissions.py`, `frontend/src/pages/channels.test.tsx` (8) | Done |
-| 5 (testing) | Channel selection + mixed RFQs, WhatsApp send/receive/extraction, AI voice (disclosure, consent, policy blocks, transcript, extraction), assistant across roles, reminders + templates, inbox, flags on/off, integration with offer verification | the seven phase-3 test modules | `pytest tests` (659) — of which 76 phase-3 backend tests; `npx vitest run` (74) | Done |
+| 5 (testing) | Channel selection + mixed RFQs, WhatsApp send/receive/extraction, AI voice (disclosure, consent, policy blocks, transcript, extraction), assistant across roles, reminders + templates, inbox, flags on/off, integration with offer verification | the seven phase-3 test modules | `pytest tests` — of which 76 phase-3 backend tests; `npx vitest run` (74) | Done |
+| 6 (phase 4 — acceptance) | The whole chain exercised end to end, happy **and** failure paths, with every role: request → clarifications → routing → mixed-channel RFQ → simulated WhatsApp/email/voice replies → extraction + human verification → comparison + negotiation → banded approvals → PO → full **and** partial receipt → requester confirmation → sealed auditor package → 3-way match (pass and mismatch) → journal drafting and posting → supplier ledger → cost on product/cost centre/unit → payment suggestion with **no execution** | `tests/test_api_phase4_full_cycle.py` | `pytest tests/test_api_phase4_full_cycle.py` (5 passed): golden cycle, mismatch/over-receipt refusals, persona permission sweep, voice-flag toggle, cross-tenant isolation | Done |
+| 6 (phase 4 — concurrency) | 50 concurrent users, WebSockets under load, no race conditions, deadlocks or permission errors on the write paths | `app/services/common.py` (`lock_for_update`), `receiving.create_receipt`, `invoicing.record_payment`, `accounting.post_entry`, `approval.decide` | `scripts/concurrency_check.py` (4/4 invariants hold; 3 of them fail with the locks removed), `scripts/load_test.py` (39.5 req/s, 0 errors, 108/108 writes), CI job `postgres` | Done — single worker, see the scale caveat in `docs/LOAD_TEST.md` |
+| 6 (phase 4 — cross-cutting) | RBAC on every screen with no 403 spam, AR RTL on new documents/templates, navy+gold consistency, voice flags on/off, all transitions audited, preferred channel honoured, accurate postings under concurrency | `app/core/rbac.py`, `frontend/src/lib/permissions.ts`, `app/services/po.py` (`po.issued`), `features.py` | persona sweep in `test_api_phase4_full_cycle.py`, `frontend/src/app.gating.test.tsx` (a requester makes no forbidden call), audit assertion over 17 transition actions, `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off` | Done |
 
 ## Non-functional requirements
 
@@ -105,7 +108,9 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | NFR-SAFE-2 | Prompt-injection corpus blocked or neutralised | `app/agents/guardrails.py` | `tests/test_injection_corpus.py` | Done |
 | NFR-AI-2 | Every agent run recorded with model, tokens, cost, reasoning | `agent_run` / `agent_step` / `tool_call`, `app/core/audit.py` | `tests/test_agents_graph.py`, `tests/test_api_admin.py` (`/agent-runs`) | Done |
 | NFR-DATA-1 | Decimal money, FX-safe rounding, bilingual numerals | `app/services/numbers.py` | `tests/test_numbers.py` (22) | Done |
-| NFR-PERF-1 | Indexes for list, board, audit and full-text paths; 50 concurrent users served | migration `0011_indexes_search_vectors`, `scripts/load_test.py` | `alembic check` on PostgreSQL 16 (CI job `postgres`); load test PASS: 40.9 req/s, p95 116 ms, p99 393 ms, 0 errors (`docs/LOAD_TEST.md`) | Done |
+| NFR-PERF-1 | Indexes for list, board, audit and full-text paths; 50 concurrent users served | migration `0011_indexes_search_vectors`, batched lookups in `analytics.spend_breakdown` and `suppliers.supplier_briefs`, `scripts/load_test.py` | `alembic check` on PostgreSQL 16.2 (CI job `postgres`); load test PASS: 39.5 req/s, p50 15 ms, p95 188 ms, p99 662 ms, 0 errors, 108/108 writes, 44/44 sockets (`docs/LOAD_TEST.md`) | Done |
+| NFR-CONC-1 | Concurrent duplicate submissions cannot corrupt the books | `lock_for_update` before every read-modify-write aggregate (receipt quantity, invoice payment, journal posting, approval decision) | `scripts/concurrency_check.py` PASS; with the locks removed the same bursts book 400 of 100 units, post one draft 6×, pay one invoice 5× | Done |
+| NFR-AUD-1 | Every status transition leaves an audit row | `app/core/audit.py` + the API/service calls that own each transition | `tests/test_api_phase4_full_cycle.py` step 16 (17 named actions across the cycle) | Done |
 | NFR-PERF-2 | Reply parsing bounded (20k chars, no unbounded LLM context) | `app/services/extraction.py` | `tests/test_services_extraction.py` | Done |
 | NFR-PRV-1 | Data-subject rights with statutory deadlines | `app/services/privacy.py`, `data_erasure_request.due_at` | `tests/test_services_privacy_portal.py` | Done |
 | NFR-UX-1 | Arabic RTL default, English toggle, single navy theme, WCAG 2.1 AA target | `frontend/src/i18n`, `tokens.css`, `tailwind.config.ts`, logical properties, `-ink` semantic text tokens | `frontend/src/i18n/i18n.test.ts` (key parity + no empty strings), `frontend/src/**/*.test.tsx` (74 tests), `frontend/src/styles/tokens.test.ts` (single theme, no `prefers-color-scheme`, every text pair ≥ 4.5:1), contrast matrix in `docs/DESIGN_SYSTEM.md` §7 | Partial — automated axe pass not wired into CI; contrast, focus and RTL are asserted, not audited by a browser |
@@ -145,6 +150,11 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | AC-ASST-2 | A requester asking about someone else's document gets `ASSISTANT_NOT_FOUND`, and the number is never returned | `tests/test_services_assistant.py` |
 | AC-FLAG-1 | With a flag off, the endpoint refuses with `BLOCK_FEATURE_OFF` instead of erroring, and works again when it is back on | `tests/test_api_channels.py::test_every_gated_endpoint_fails_closed_when_its_flag_is_off` |
 | AC-ACC-5 | Cost never leaves the analytical dimension: an inventory debit without a cost centre is refused | `tests/test_services_accounting.py::test_a_cost_debit_without_a_cost_centre_is_refused` |
+| AC-P4-1 | Two deliveries cannot add up to more than was ordered | `tests/test_services_receiving.py::test_two_deliveries_cannot_add_up_to_more_than_was_ordered`, `scripts/concurrency_check.py` |
+| AC-P4-2 | One invoice can be paid once, one draft can be posted once, one approval step can be decided once — even under concurrent requests | `scripts/concurrency_check.py` (3 of the 4 invariants fail with the locks removed) |
+| AC-P4-3 | A decision on an already-decided approval is refused with a 4xx, never reported as success | `tests/test_services_governance.py` (second decision → 422) |
+| AC-P4-4 | The payment suggestion appears but no money moves, and `execution` is never anything but `outside_platform` | `tests/test_api_phase4_full_cycle.py`, `tests/test_services_invoicing.py`, `tests/test_agents_graph.py` |
+| AC-P4-5 | A purchase order issue is in the audit trail as its own transition | `tests/test_api_phase4_full_cycle.py` step 16 (`po.issued`), `app/services/po.py` |
 
 ## What is not covered here
 
@@ -153,7 +163,9 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
    WhatsApp is proven against the fake Cloud API provider and voice against the scripted telephony
    provider — the provider contract is exercised, the live service is not.
 2. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
-   production build, TypeScript strict typecheck, ESLint, and 74 component/interaction tests.
+   production build, TypeScript strict typecheck, ESLint, and 74 component/interaction tests. The
+   end-to-end cycle is therefore proven at the HTTP/API level (`tests/test_api_phase4_full_cycle.py`),
+   not by driving a browser.
 3. pgvector *similarity ranking* is not implemented (the columns and HNSW indexes exist and are
    verified on PostgreSQL 16, but no service computes embeddings yet); search falls back to the
    trigram path.

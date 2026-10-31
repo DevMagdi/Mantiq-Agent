@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     # --- core ---
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 240
+    # Unauthenticated traffic is bucketed per client IP. The default is deliberately generous: one
+    # corporate NAT (a whole office, or a load balancer) can legitimately produce hundreds of
+    # requests a minute, and a per-IP cap that throttles a tenant is a bug, not a defence.
+    rate_limit_anonymous_per_minute: int = 600
+    # Sign-in is bucketed twice: per account (credential stuffing against one user) and per IP
+    # (mass attempts from one host) — the per-IP cap allows a full office to arrive at 08:00.
+    rate_limit_login_per_account: int = 10
+    rate_limit_login_per_ip: int = 120
     public_base_url: str = "http://localhost:5173"
     app_name: str = "ProcureAI"
     app_env: str = "dev"  # dev | staging | prod

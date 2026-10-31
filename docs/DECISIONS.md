@@ -366,3 +366,47 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
 88. **Speech is untrusted input.** `POST /assistant/transcribe?ask=true` runs the same intake scanning
     as any other text before answering, and the transcript is stored on the turn with its confidence;
     the assistant is never granted a capability because the request arrived by voice.
+89. **Over-receipt is checked cumulatively, never per delivery.** A receipt line is measured against
+    what is still owed — ordered quantity minus everything already booked as `received` or
+    `confirmed` — not against the ordered quantity on its own. Two deliveries of 60 against an order
+    of 100 used to both pass; the second is now refused with `OVER_RECEIPT`, and the message names
+    the quantity that was already received so the warehouse can see why. The check is the same for
+    full and partial receipts, and the refusal is a 422 whose `issues[]` carries the per-line detail.
+90. **Every read-modify-write aggregate is locked before it is read.** `common.lock_for_update`
+    issues `SELECT … FOR UPDATE` (plus `populate_existing`, tenant-scoped whenever the model carries a
+    `tenant_id`) and is taken before the check it protects: the purchase order before the receipt
+    quantity test, the supplier invoice before a payment, the journal entry before posting, the
+    approval before a decision. Without those locks the invariants are only true when nobody is
+    concurrent: `scripts/concurrency_check.py` shows, with the four locks disabled, 8 simultaneous
+    half-receipts booking **400 units against an order of 100**, one draft journal entry posted
+    **six times** and one invoice paid **five times**. With the locks in place the same bursts produce
+    exactly two receipts, one posting and one payment. The cost is honest too: the hot row is
+    serialised, so eleven simultaneous receipts against *one* order reach p95 ≈ 1.3 s while the
+    aggregate p95 across the run stays at 188 ms (docs/LOAD_TEST.md).
+91. **A second decision on an already-decided approval is an error, not a silent no-op.** The
+    approval service returns `{ok: false, error: "Approval is 'approved', not pending."}`; the
+    endpoint used to answer 200 with that body, which looks like success to a double-clicking user
+    and to any client that only checks the status code. It now raises `ValidationFailed` (422) like
+    every other refused transition in the API.
+92. **Rate limiting is per identity, not per IP.** Authenticated traffic is bucketed as `user:<sub>`
+    (240 requests/min), anonymous traffic as `ip:<host>` (600/min), and login is limited both per
+    account (10/min) and per address (120/min) so one office behind a single NAT address cannot
+    lock the others out, and fifty load-test users on one IP are not throttled as one client.
+93. **The load test measures the write path, not the refusal path.** The demo dataset has a single
+    purchase order and it is already fully received, so every goods receipt used to be refused by
+    the (correct) over-receipt guard and the write path was never exercised. The harness now seeds
+    five large, freshly issued orders (`--receipt-orders`, `--no-seed` to opt out) that the warehouse
+    personas receive against, and it resolves `{po_id}`-style ids **per virtual user** instead of
+    always taking the first row: fifty users posting to one order measure a row lock, not a system.
+94. **The concurrency proof is part of CI.** `scripts/concurrency_check.py` runs in the `postgres` CI
+    job right after the RLS verification, against a real PostgreSQL 16 with the seeded demo data, so
+    a future change that drops a lock or reorders a check fails the build instead of quietly
+    reopening the race.
+95. **Hot read paths batch their lookups.** `analytics.spend_breakdown` resolved the supplier, RFQ,
+    requisition, plant and category once *per purchase order* (55 ms of query time for twelve
+    orders, linear afterwards) and the supplier list resolved the primary contact and the
+    certifications once *per row* (≈50 queries for a 25-row page). Both are now a fixed number of
+    `IN` queries: spend 55 ms → 5 ms, supplier list 45 ms → 13 ms over HTTP, same payloads.
+96. **The dashboard reads the price history once.** The chart and the forecast each ran the same
+    query; they now share one pass (the dashboard's own latency fell from ~60 ms to ~33 ms warm,
+    on top of the batching above).

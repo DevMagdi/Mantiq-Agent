@@ -41,6 +41,23 @@ def paginate(page: int = 1, page_size: int = 25) -> tuple[int, int]:
 
 
 # ------------------------------------------------------------------ notifications
+async def lock_for_update(session: AsyncSession, model, row_id: str, *, tenant_id: str | None = None):
+    """Re-read one row under a write lock before a read-modify-write on an aggregate.
+
+    Every mutation that decides "may this happen?" by looking at a running total has to serialize
+    on the row that owns the total. Without the lock, two requests read the same balance, both pass
+    the check and both write — one payment too many, two postings of one entry, an over-receipt that
+    is only visible after the fact. On PostgreSQL this is `SELECT ... FOR UPDATE`; on SQLite (test
+    only) the clause is dropped, which is why the concurrency proof in `scripts/concurrency_check.py`
+    runs against PostgreSQL.
+    """
+    query = select(model).where(model.id == row_id)
+    if tenant_id and hasattr(model, "tenant_id"):
+        query = query.where(model.tenant_id == tenant_id)
+    statement = query.with_for_update().execution_options(populate_existing=True)
+    return (await session.execute(statement)).scalar_one_or_none()
+
+
 async def notify(
     session: AsyncSession,
     *,
