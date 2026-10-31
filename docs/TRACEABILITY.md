@@ -172,6 +172,23 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | P5-10 | Secrets encrypted at rest, masked in every response, and every credential change audited | `EncryptedString`/`encrypt_text` on `IntegrationConfig.secrets_enc`, `integration_service.mask`, audit rows `integration.configured` / `.secrets_updated` / `.enabled` / `.disabled` / `.removed` / `.tested` | `tests/test_api_integrations.py` (masking, keep-on-blank, audit) | Done |
 | P5-11 | A complete, enabled tenant configuration is what the runtime uses — no silent fallback to a fake — and disabling restores the platform adapter | `integration_service.configured`/`adapter_for` used by messaging, voice, WhatsApp channel, discovery, RFQ dispatch and the LLM factory | `tests/test_api_integrations.py`, e2e `integrations` (`llm=live, whatsapp=live, platform still fake`) and `integration safety` (no vendor call while disabled) | Done |
 
+## Phase-6 requirements (pilot hardening)
+
+| ID | Requirement | Implementation | Proof | Status |
+| --- | --- | --- | --- | --- |
+| P6-A1 | Accounting is a deployment switch, off by default, with no API/UI trace when off | `app/core/config.py::accounting_enabled`, `app/api/router.py::build_api_router`, `app/main.py::create_app` | `tests/test_accounting_hidden.py` (6: router absent, 0 accounting paths in `/api/openapi.json` versus 19 on) | Done |
+| P6-A2 | Accounting-ish routes outside the module are hidden too (supplier ledger, P2P lifecycle, PO accounting/audit-package) | `app/api/v1/accounting.py` (routes moved out of `orders.py`), `app/services/p2p.py` (stages clamped) | `tests/test_accounting_hidden.py` (each path 404s identically to an unknown URL), `tests/test_services_p2p.py` | Done |
+| P6-A3 | No accounting side effects when off, and the post-PO flow still completes | `app/services/receiving.py` (no journal, no auditor package), `app/services/bootstrap.py` (no chart of accounts) | `tests/test_accounting_hidden.py::test_a_full_cycle_leaves_no_accounting_rows` (asserted row counts), `tests/test_api_phase4_full_cycle.py` with the switch on | Done |
+| P6-A4 | Capabilities disclose nothing the caller cannot use | `app/core/rbac.py::visible_permissions` | `tests/test_accounting_hidden.py`, `frontend/src/accounting.hidden.test.tsx` | Done |
+| P6-A5 | Same frontend build serves both modes, with no placeholder screens | `frontend/src/App.tsx` (`CapabilityRoute`), `lib/nav.ts` (`HIDDEN_GROUPS`), `components/Sidebar.tsx` | `frontend/src/accounting.hidden.test.tsx`, `frontend/src/app.gating.test.tsx` | Done |
+| P6-B1 | A WhatsApp delivery is attributed by `phone_number_id`, never by a default tenant | `app/services/whatsapp_channel.py::tenant_for_phone_number_id`, `app/api/v1/rfq.py::inbound` | `tests/test_api_whatsapp_inbound.py` (known id, unknown id, two tenants, disabled row) | Done |
+| P6-B2 | Signature failures are visible without leaking anything, and strict deployments cannot boot without the app secret | `app/adapters/whatsapp.py`, `app/api/v1/rfq.py::inbound`, `app/core/providers.py` | `tests/test_api_whatsapp_inbound.py` (401 + audit + reason), `tests/test_providers_strict.py` | Done |
+| P6-B3 | A colleague's message becomes a purchase request; a supplier's reply stays a quote; an unknown sender creates nothing | `app/services/whatsapp_channel.py::intake_from_user`/`ingest_inbound_whatsapp`, `app/services/phone.py` | `tests/test_api_whatsapp_inbound.py` (25), `tests/test_services_whatsapp.py` (unchanged) | Done |
+| P6-C1 | The PO PDF is readable Arabic, with the font embedded | `app/services/pdf_fonts.py`, `app/services/po.py::po_pdf`, `app/assets/fonts/` | `tests/test_services_po_pdf.py` (7: font + licence ship, shapable, embedded subset, right-to-left run order, Latin untouched, missing-font degradation) | Partial — the page has not been rendered to pixels (no rasteriser here); a human opens the sample |
+| P6-C2 | No demo data and no public demo password outside dev | `app/core/config.py::demo_refusal`/`assert_demo_credentials_are_safe`, `app/cli.py`, `app/main.py` | `tests/test_cli.py` (3 of its 12: staging/production refusal, strict boot on the default password, dev untouched) | Done |
+| P6-C3 | The pilot ships the AI-voice surfaces off and says so in the UI | `app/core/config.py` (defaults), `app/services/features.py`, `frontend/src/pages/VoiceCallsPage.tsx` | `tests/test_api_feature_flags.py`, `frontend/src/i18n/i18n.test.ts` | Done |
+| P6-C4 | The README claims only what was tested | `README.md` | review | Done |
+
 ## What is not covered here
 
 1. No third-party service was contacted for real in this environment: Telegram-free egress allows only
