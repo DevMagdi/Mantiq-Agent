@@ -954,7 +954,26 @@ export type ChannelState = ChannelLabel & {
   opted_in: boolean;
   reasons: string[];
   address_hint: string;
-  priority: number;
+  has_address: boolean;
+};
+
+/** What the backend would actually use for this supplier right now, and why. */
+export type ResolvedChannel = {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_name_ar: string;
+  channel: string;
+  channel_label: string;
+  channel_label_ar: string;
+  source: string;
+  source_label: string;
+  source_label_ar: string;
+  available: boolean;
+  opted_in: boolean;
+  reasons: string[];
+  candidates: ChannelState[];
+  rfq_id: string | null;
+  invitation_id: string | null;
 };
 
 export type ChannelCapabilities = {
@@ -972,12 +991,11 @@ export type ChannelCapabilities = {
 
 export type SupplierChannels = {
   supplier_id: string;
-  supplier_name: string;
   preferred_channel: string;
   secondary_channels: string[];
   preferred_language: string;
   channels: ChannelState[];
-  opted_out?: { channel: string; status: string; updated_at: string }[];
+  resolved: ResolvedChannel;
 };
 
 export type RfqChannelRow = {
