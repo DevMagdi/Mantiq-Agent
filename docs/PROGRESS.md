@@ -1,23 +1,25 @@
 # Build progress — honest status
 
-Updated: 2026-10-31 (phase 4 — final hardening and testing). This file exists so nobody has to guess
-what works. Each row says what is implemented, what is proven by a test, and what genuinely does not
-exist yet.
+Updated: 2026-10-31 (phase 5 — real providers, cross-replica live events, browser-test suite). This
+file exists so nobody has to guess what works. Each row says what is implemented, what is proven by a
+test, and what genuinely does not exist yet.
 
-Verification commands behind this snapshot. Every row below was executed for this phase; real output
-is pasted in `docs/PR_PHASE4.md`. The PostgreSQL rows ran against a **real PostgreSQL 16.2** built in
-the sandbox (with the `citext`, `pg_trgm`, `pgcrypto` and `vector` extensions), and the same
-commands run in CI (job `postgres`).
+Verification commands behind this snapshot. Everything below was executed for this phase; real output
+is pasted in `docs/PR_PHASE5.md`.
 
 ```bash
-cd backend && pytest tests                              # 672 tests, 0 failures   (SQLite, test-only)
+cd backend && pytest tests                              # 731 tests, 0 failures, 88 % line coverage
 cd backend && ruff check app tests                      # clean
-cd backend && alembic upgrade head && alembic check     # fresh PostgreSQL 16.2, 16 migrations, no drift
-python scripts/verify_rls.py                            # 29 guarantees: 6 + 13 (phase 2) + 10 (phase 3)
-python scripts/concurrency_check.py                     # 4 concurrency invariants hold (PostgreSQL)
-python scripts/load_test.py --users 50 --duration 60    # PASS: 39.5 req/s, p50 15 ms, p95 188 ms, 0 errors
-cd frontend && npm run typecheck && npm run lint && npm run test && npm run build   # 74 tests, build ok
+python scripts/e2e_journeys.py                          # 13 journeys PASS (two replicas + real Redis +
+                                                        # Twilio-shaped + Anthropic-shaped servers)
+cd frontend && npm run typecheck && npm run lint && npm run test && npm run build   # 76 tests, build ok
+cd frontend && npm run e2e:typecheck                     # Playwright suite compiles (strict)
 ```
+
+The PostgreSQL-only proofs (RLS isolation, concurrency invariants, the 50-user load run) were measured
+in phase 4 on a real PostgreSQL 16.2 and **were not re-measured in this phase**: the sandbox reset
+removed the local server, and no PostgreSQL binary is installable here. They run on every push in the
+CI job `postgres`; the numbers below are labelled with the phase they were measured in.
 
 ## Implemented and tested
 
@@ -48,12 +50,12 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Workers | five scheduled Celery jobs + beat schedule, run eagerly in tests | `tests/test_workers.py` |
 | CLI | migrate, bootstrap, seed-demo, create-tenant, create-user, reset-password, purge, fx-refresh, doctor | `tests/test_cli.py` |
-| Frontend | 22 pages across 22 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 74 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
+| Frontend | 22 pages across 22 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 76 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
 | Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (44/44 sockets connected under load) |
 | PostgreSQL verification | Migration chain `0001→0016` applied from scratch, `alembic check` (no drift), bootstrap + demo seed, 67 RLS policies, append-only refusals, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (29/29 PASS locally and in CI), CI job `postgres` |
-| Load | 50 concurrent role-based sessions (reads, requisitions, goods receipts and 44 live WebSockets): 39.5 req/s, p50 15 ms, p95 188 ms, p99 662 ms, 0 errors, 108/108 writes accepted; found and fixed a PII-decryption 500, a hot-loop in the harness and two hot-read N+1s | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
+| Load (phase-4 measurement) | 50 concurrent role-based sessions (reads, requisitions, goods receipts and 44 live WebSockets): 39.5 req/s, p50 15 ms, p95 188 ms, p99 662 ms, 0 errors, 108/108 writes accepted; found and fixed a PII-decryption 500, a hot-loop in the harness and two hot-read N+1s | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Concurrency control | The read-modify-write aggregates are locked (`SELECT … FOR UPDATE`) before the check they protect: receipt quantity, invoice payment, journal posting, approval decision. Proven from the outside by firing the same request 5–8× at once | `scripts/concurrency_check.py` (PASS with locks, 400-of-100 received / 6 postings / 5 payments without them), `tests/test_services_receiving.py` (cumulative over-receipt), CI job `postgres` |
 | Hot read paths | `analytics.spend_breakdown` and the supplier list batch their lookups instead of querying per row (spend 55 → 5 ms, supplier list 45 → 13 ms) and the dashboard reads the price history once | `tests/test_services_analytics.py`, `tests/test_api_intake.py`, endpoint timings in `docs/LOAD_TEST.md` |
 | Post-award screens | PO list with lifecycle filters, PO detail with stepper + receipts + invoice/match tables, receipt/confirm/invoice/approve/payment drawers, supplier balance card | `frontend/src/pages/PurchaseOrdersPage.tsx`, `PurchaseOrderDetailPage.tsx`, `frontend/src/pages/pages.test.tsx` |
@@ -67,6 +69,14 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Supplier sub-ledger | Invoices, payments and their journal support per supplier with a live payable balance | `accounting.supplier_account`, `GET /accounting/supplier-account/{id}` |
 | Accounting screens | Journal list + entry drawer (post/reverse with reason), chart of accounts & cost centres, trial balance / cost analysis / supplier balances, PO accounting panel and audit-package review — all bilingual with permission gating | `frontend/src/pages/JournalPage.tsx`, `AccountingReportsPage.tsx`, `AccountingSetupPage.tsx`, `components/{P2PRail,PostingsCard,AuditPackageCard}.tsx`, `frontend/src/pages/accounting.test.tsx` (6) |
 | Phase-2 RBAC | `controller` (draft/post/reverse + cost master data) and `auditor` (read-only money + package review), neither able to approve a purchase; UI matrix mirrored and asserted | `app/core/rbac.py`, `tests/test_frontend_permissions.py` |
+| Provider policy (fail-fast) | Every adapter choice goes through one table: in `staging`/`production` a fake on a **critical** path (email, LLM, WhatsApp when enabled, telephony/STT when AI calls are enabled) aborts startup listing the exact variables, and `registry.build`/`default_provider()` raise if code asks anyway. Optional capabilities (SMS, search, OCR, ERP, payments) log a warning instead of blocking a boot. `ALLOW_FAKE_PROVIDERS=true` is the only, explicit, logged way to keep fakes | `app/core/providers.py`, `app/adapters/registry.py`, `tests/test_providers_strict.py` (9) |
+| Twilio transport (WhatsApp + SMS + voice) | Real Programmable Messaging/Voice clients: basic auth, form-encoded bodies, `whatsapp:` addressing, `ContentSid`/`ContentVariables` templates, `MediaUrl` documents (an inline upload is refused explicitly instead of being dropped), bounded retries on 429/5xx only, 4xx returned with Twilio's code, voice calls carry the disclosure TwiML first and report `failed` when Twilio rejects them | `app/adapters/twilio.py`, `app/adapters/telephony_ocr_stt.py`, `tests/test_adapters_twilio.py` (15, against a real local HTTP server) |
+| Twilio webhooks | Inbound WhatsApp/SMS accept form-encoded callbacks, verify `X-Twilio-Signature` (HMAC-SHA1 over the public URL + sorted params) and refuse unsigned requests with 401; a status callback is mapped to a delivery receipt; SMS is a first-class dispatch channel next to email/WhatsApp | `app/api/v1/rfq.py` (`/inbound/{channel}`), `app/services/messaging.py`, `tests/test_adapters_twilio.py`, `tests/test_api_channels.py` |
+| LLM providers | Anthropic Messages API and any OpenAI-compatible `/v1/chat/completions` (OpenAI, vLLM, Ollama, LM Studio): exact env-driven model, forced tool call or `json_object` for structured tasks, retries on 429/5xx/transport only, 4xx fails fast, token metering per tenant | `app/agents/llm/providers.py`, `tests/test_llm_real_path.py` (11, incl. the real pipeline over HTTP) |
+| Live events across replicas | One Redis pub/sub channel with a per-process origin id: publish delivers locally first, then to Redis; the listener forwards other replicas' envelopes to its own sockets and skips its own, so no client sees a duplicate. A publish that cannot reach Redis still reaches local sockets and is logged as an incident; `WS_FANOUT_ENABLED=true` in a strict environment refuses to boot without a reachable Redis | `app/services/events.py`, `app/api/ws.py`, `tests/test_ws_fanout.py` (6, against a real `redis-server`), `scripts/e2e_journeys.py` |
+| End-to-end journeys (headless) | 13 journeys run against **two** API processes sharing one Redis, a Twilio-shaped server and an Anthropic-shaped server: sign in/refresh/sign out, requisition → RFQ → dispatch, outbound WhatsApp accepted by Twilio, signed inbound webhook (and 401 without a signature), the resulting `offer.extracted` frame arriving on **both** replicas, a supplier reply extracted by the real LLM provider, capabilities and a feature flag refusing a send | `scripts/e2e_journeys.py`, CI job `backend` |
+| Template authoring | The template library now creates new versions (code, channel, locale, subject, body, variables) through `POST /templates`, permission-gated in the UI, with the previous version deactivated by the backend | `frontend/src/pages/TemplatesPage.tsx`, `frontend/src/pages/channels.test.tsx` |
+| Environment reference | Every variable the process reads, what it changes, and what fails without it | `docs/ENVIRONMENT.md`, `deploy/.env.example` |
 | Channel selection | Per-supplier preferred + secondary channel, per-RFQ override (with a reason), a resolver that ranks WhatsApp → voice → email → web form and reports *why* each candidate was rejected, mixed-channel RFQs | `app/services/channels.py`, `tests/test_services_channels.py` (12), `tests/test_api_channels.py` (18), `frontend/src/components/{RfqChannelPanel,SupplierChannelsPanel}.tsx` |
 | WhatsApp (first-class) | Text, approved templates, documents and interactive structured quote requests; inbound text/audio/document ingestion with STT and OCR → the normal extraction + verification path; delivery/read receipts that never move backwards; per-channel consent with STOP/START in Arabic and English honoured before any parsing; searchable history per supplier and per RFQ | `app/adapters/whatsapp.py`, `app/services/whatsapp_channel.py`, `tests/test_services_whatsapp.py` (11) |
 | Voice (human + AI) | Outbound calls linked to RFQ + supplier, disclosure first, recording only on explicit consent, country calling windows, full transcript and per-turn audit | `app/services/voice.py`, `app/services/voice_agent.py`, `tests/test_services_voice.py`, `tests/test_services_voice_agent.py` (9) |
@@ -85,11 +95,12 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Item | What is missing | Consequence |
 | --- | --- | --- |
 | pgvector similarity ranking | The `embedding_vec vector(1536)` columns and HNSW indexes are created by migration `0011` (verified on real PostgreSQL 16), but no service computes embeddings yet | Ranking falls back to the trigram/keyword path; the columns are ready for an embedding provider |
-| Real adapters | SMTP, Meta WhatsApp Cloud API, Twilio, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented; only the deterministic fakes are exercised |
-| LLM providers | Anthropic / OpenAI-compatible network calls | Implemented with retries and metering; CI uses `FakeLLM` |
+| Real adapters | SMTP, Meta WhatsApp Cloud API, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented and unit-tested against local servers; no live vendor account was available in this sandbox, so no call reached the vendor's own service |
+| Live vendor credentials | A Twilio account SID/token with a WhatsApp sender, and an Anthropic/OpenAI key | Everything except the vendor's own endpoint is proven locally; a live smoke test needs the credentials and outbound egress listed in `docs/ENVIRONMENT.md` |
+| Twilio at scale | WhatsApp template approval, media hosting for documents | Documents require a public `MediaUrl` (the adapter refuses rather than dropping them); templates need Meta approval of the Content template |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
-| Browser E2E | Playwright suite | UI is verified by build + typecheck + ESLint + 74 component/token tests, not a real browser (no browser binary is available in this sandbox) |
-| WebSocket at scale | Redis pub/sub fan-out | The hub is in-process; multi-replica deployments need the fan-out documented in `docs/API.md` |
+| Browser E2E | A Playwright suite (`frontend/e2e`) covering sign-in/out, RTL/English, every route and the WebSocket handshake exists and typechecks, but **no browser binary can be downloaded in this sandbox** (the CDN is blocked), so it has not been executed | The same journeys are proven without a browser by `scripts/e2e_journeys.py` (HTTP + WebSocket, two replicas); a machine with network access runs `npx playwright install chromium && npm run e2e` |
+| WebSocket back-pressure | A slow client is dropped after its first failed send; there is no per-socket queue | Load shedding is deliberate (a stuck browser must not stall a replica), but a burst to a slow client loses intermediate frames |
 | Real payment execution | Bank/PSP integration | Deliberately absent: the product records payments made outside it. `payment_suggestion.execution` is literally `outside_platform`, and there is no adapter seam to enable by accident |
 | WhatsApp production transport | A real Meta Cloud API / BSP account (phone number id, permanent token, approved template names) | `WhatsAppProvider` is implemented against the documented Cloud API shapes; CI runs the deterministic fake, so retries, receipts and rich messages are proven but not against Meta's live service |
 | Voice media (STT/TTS duplex) | A telephony provider with media streams | The AI agent plays a scripted transcript through the `TelephonyProvider` seam and stores every turn; there is no live audio bridge, so "the AI speaks" is a scripted, audited turn, not a live synthesis |
@@ -104,6 +115,7 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | Fully automated key rotation CLI | Needs a running secret manager | `app/core/crypto.py` records `key_id` so DEKs can be re-wrapped; procedure in `docs/SECURITY.md` |
 | Mobile app | Not in scope | The API is versioned and CORS-configured for a future client |
 | e-Invoicing / VAT submission | Country-specific compliance not in the SRS extract | Invoice model carries `lines`, `currency`, `status`; a submission adapter would slot in next to the payment adapter |
+| Distributed tracing (OTel) | `deploy/otel-collector.yaml` exists but the application does not emit spans or metrics yet; `OTEL_ENABLED` is reserved | Add `opentelemetry-instrumentation-fastapi` + an OTLP exporter in `app/main.py`; request ids and structured logs already carry the correlation id |
 
 ## Infrastructure verified in CI
 
@@ -121,8 +133,8 @@ the Celery workers are not executed here; their code paths run eagerly in the te
    (`export_subject_data`, `execute_erasure`) kept for the CLI `purge` path; the API uses the newer
    `app/services/privacy.py`. Both are tested; consolidating them is a clean-up task, not a
    behaviour gap.
-2. `app/agents/llm/providers.py` is the least-covered module (23%): its network code is excluded
-   from CI by design and only the request/response shaping is unit-tested.
+2. `app/agents/llm/providers.py` is now exercised over a real socket (success, retry, 4xx, transport
+   failure) but still not against a vendor's live endpoint; a live smoke test needs `LLM_API_KEY`.
 3. The WebSocket hub has no back-pressure: a slow client is dropped after the first failed send.
 4. Arabic PDF rendering of purchase orders uses the Latin font stack; Arabic strings render but not
    with the display face. Requires an embedded Arabic font subset.
@@ -135,9 +147,10 @@ the Celery workers are not executed here; their code paths run eagerly in the te
 7. The assistant and the AI voice agent are deliberately deterministic (see above): adding an LLM
    later must not move the policy check out of code, which is why `voice_agent` returns
    `knowledge_version` and per-turn `block_code` — a regression there is visible in the data.
-8. The load test measures one uvicorn worker against one PostgreSQL instance; it does not prove
-   horizontal scaling, and the WebSocket hub still needs the Redis fan-out before running more than
-   one API replica (`docs/API.md`).
+8. The load test measures one uvicorn worker against one PostgreSQL instance. Cross-replica behaviour
+   is proven separately (`scripts/e2e_journeys.py` runs two API processes over one Redis), but no
+   load run has been executed against more than one replica: the rate limiter is still an in-process
+   counter, so N replicas multiply the effective per-user budget by N.
 9. Concurrent goods receipts against **one** purchase order serialise on that order's row lock by
    design (that is what makes the cumulative over-receipt check safe). Eleven simultaneous receipts
    on the same order reach p95 ≈ 1.3 s while the aggregate p95 stays at 188 ms; a real warehouse

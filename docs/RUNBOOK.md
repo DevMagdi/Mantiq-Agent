@@ -9,7 +9,7 @@ Everything an operator needs to install, seed, upgrade, monitor, and recover Pro
 | Python | 3.11+ | `python -m venv .venv` |
 | Node.js | 20+ | frontend build |
 | PostgreSQL | 16 | extensions `pgcrypto`, `citext`, `pg_trgm`, `vector` (migration 0001 creates them) |
-| Redis | 7 | Celery broker/result backend, rate-limit counter |
+| Redis | 7 | Celery broker/result backend **and** the WebSocket live-event fan-out (`REDIS_URL`) |
 | Docker Compose | 2.x | optional, `deploy/docker-compose.yml` |
 
 SQLite works for a laptop or CI (`DATABASE_URL=sqlite+aiosqlite:///./procureai.db`); PostgreSQL is
@@ -38,6 +38,15 @@ Without Docker, any PostgreSQL 16 server works, provided the `vector`, `citext`,
 `pgcrypto` extensions are installable — on Debian/Ubuntu that is
 `apt install postgresql-16 postgresql-contrib-16` plus `pgvector` from your distribution or source.
 Then create the role/database and run the same `alembic upgrade head`.
+
+Before going live, check the provider configuration. `APP_ENV=staging|production` refuses to boot
+with a fake on a critical path and lists every missing variable in one message; `docs/ENVIRONMENT.md`
+documents each one, and `python -m app.cli doctor` prints what the process actually resolved.
+
+```bash
+procureai doctor                        # env, adapters, migration head
+python scripts/e2e_journeys.py          # 13 real journeys: two replicas + Redis + vendor-shaped servers
+```
 
 Verify the guarantees the application relies on:
 
