@@ -4,6 +4,10 @@ The Integrations tab used to be decorative: it stored a JSON blob that nothing r
 "configure" SMTP and the platform would keep sending with the fake adapter. This change makes the
 screen the real control plane for six providers, and proves it end to end.
 
+> **Branch.** Arena binds this session to `arena/cc56b821-mantiq-agent`, so the work is delivered
+> from that branch (branch creation and renaming are blocked in this environment); PR #9 was merged
+> from the previous session branch `arena/99846bf6-mantiq-agent`, whose tip is this branch's base.
+
 What an administrator can now do without touching `.env`:
 
 1. see every provider's true status — `Live` · `Sandbox` · `Not configured` · `Error` · `Disabled`;
