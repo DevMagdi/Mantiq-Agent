@@ -187,8 +187,8 @@ ProcureAI end-to-end journeys
 The two new journeys assert, in order: `/integrations` starts at `sandbox` for LLM and WhatsApp while
 the platform is fake → a tenant admin saves an Anthropic key and Twilio credentials → both become
 `live`, the secret is never echoed (only `••••` + last four), both probes really reach the vendor
-(the Twilio probe authenticates against `/2010-04-01/Accounts/{sid}.json` and gets `401 20003` on a
-wrong token) → a reload still hides the secret → `PATCH enabled:false` turns WhatsApp `disabled` and a
+(the Twilio probe authenticates against `/2010-04-01/Accounts/{sid}.json`, a route the stub serves
+with a Basic-auth check that answers Twilio's own `401 20003` when the token is wrong) → a reload still hides the secret → `PATCH enabled:false` turns WhatsApp `disabled` and a
 supplier reply is extracted with **no** vendor LLM call and no `anthropic:` model recorded → re-enabling
 restores the real provider.
 
