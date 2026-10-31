@@ -12,8 +12,8 @@ Status vocabulary:
 * **Stub-with-adapter** — the interface and the deterministic fake exist; the real client is
   behind credentials and is not exercised here.
 
-Test counts (672 backend tests, 74 frontend tests) and coverage are reproduced in
-`docs/PR_PHASE4.md`.
+Test counts (731 backend tests, 76 frontend tests, 88 % backend line coverage) and the real command
+output are reproduced in `docs/PR_PHASE5.md`.
 
 ## Functional requirements
 
@@ -156,16 +156,29 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
 | AC-P4-4 | The payment suggestion appears but no money moves, and `execution` is never anything but `outside_platform` | `tests/test_api_phase4_full_cycle.py`, `tests/test_services_invoicing.py`, `tests/test_agents_graph.py` |
 | AC-P4-5 | A purchase order issue is in the audit trail as its own transition | `tests/test_api_phase4_full_cycle.py` step 16 (`po.issued`), `app/services/po.py` |
 
+## Phase-5 requirements (real integrations, no fakes in the production path)
+
+| ID | Requirement | Implementation | Proof | Status |
+| --- | --- | --- | --- | --- |
+| P5-1 | No fake provider on a critical path in `staging`/`production` | `app/core/providers.py` (`requirements`, `assert_ready`, `critical_fake_selections`), `app/adapters/registry.py`, `app/agents/llm/__init__.py::default_provider` | `tests/test_providers_strict.py` (9), boot check in `app/main.py` lifespan | Done |
+| P5-2 | WhatsApp + SMS + voice through a real vendor API | `app/adapters/twilio.py`, `app/adapters/telephony_ocr_stt.py::TwilioTelephonyProvider` | `tests/test_adapters_twilio.py` (15, real HTTP server), `scripts/e2e_journeys.py` | Done (vendor endpoint replaced by a local server; live account needs credentials) |
+| P5-3 | Inbound webhooks authenticated | `app/api/v1/rfq.py::inbound` (Twilio HMAC-SHA1, Meta HMAC-256) | `tests/test_adapters_twilio.py`, `tests/test_api_channels.py`, `scripts/e2e_journeys.py` (unsigned → 401) | Done |
+| P5-4 | Real LLM calls with bounded retries and structured output | `app/agents/llm/providers.py`, `app/agents/llm/__init__.py` | `tests/test_llm_real_path.py` (11, including the extraction pipeline over HTTP) | Done (vendor endpoint replaced by a local server) |
+| P5-5 | Live events reach clients on every replica | `app/services/events.py`, `app/api/ws.py` | `tests/test_ws_fanout.py` (6, real `redis-server`), `scripts/e2e_journeys.py` (two uvicorn replicas) | Done |
+| P5-6 | Every environment variable documented and validated | `docs/ENVIRONMENT.md` (all 83 settings), `deploy/.env.example`, `app/cli.py::doctor` | `tests/test_env_docs.py` (5 — every setting documented, no phantom variable, no secret in the template), `tests/test_cli.py` (doctor reports modes and fails a strict deployment) | Done |
+| P5-7 | Browser end-to-end suite | `frontend/e2e/*.spec.ts`, `frontend/playwright.config.ts` | `npm run e2e:typecheck` in CI | Partial — written and typechecked, not executed: no browser binary can be downloaded here |
+| P5-8 | End-to-end journeys executed against the real stack | `scripts/e2e_journeys.py` | 13 journeys, CI job `backend` | Done |
+
 ## What is not covered here
 
-1. Real third-party clients (Anthropic/OpenAI, Twilio, Meta Cloud API, Paymob, ERP HTTP endpoints)
-   are implemented but not exercised: tests use their deterministic fakes. For phase 3 this means
-   WhatsApp is proven against the fake Cloud API provider and voice against the scripted telephony
-   provider — the provider contract is exercised, the live service is not.
-2. Browser-level E2E (Playwright) is not part of the committed suite; the UI is verified by a real
-   production build, TypeScript strict typecheck, ESLint, and 74 component/interaction tests. The
-   end-to-end cycle is therefore proven at the HTTP/API level (`tests/test_api_phase4_full_cycle.py`),
-   not by driving a browser.
+1. No third-party service was contacted for real in this environment: Telegram-free egress allows only
+   the package registries. The Twilio, Anthropic and OpenAI clients therefore talk to local servers
+   that speak the vendors' wire formats — request shape, auth headers, retries, error mapping and
+   parsing are exercised; the vendor's own endpoint is not. A live smoke test needs the credentials
+   listed in `docs/ENVIRONMENT.md` plus outbound access to those hosts.
+2. Browser-level E2E is committed (`frontend/e2e`) and typechecked in CI but has not been executed
+   here: `npx playwright install chromium` fails because the Playwright CDN is unreachable. The same
+   journeys run without a browser in `scripts/e2e_journeys.py` and `tests/test_api_phase4_full_cycle.py`.
 3. pgvector *similarity ranking* is not implemented (the columns and HNSW indexes exist and are
    verified on PostgreSQL 16, but no service computes embeddings yet); search falls back to the
    trigram path.

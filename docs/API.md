@@ -268,6 +268,15 @@ verifies `X-Hub-Signature-256` in `cloud_api` mode, then processes, in this orde
 consent events (`STOP` / `START`) → messages (media downloaded and transcribed/extracted) → the shared
 extraction pipeline. The tenant is chosen with the `x-tenant-slug` header (default `nile`).
 
+**Twilio webhooks.** With `WHATSAPP_PROVIDER=twilio` (or `SMS_PROVIDER=twilio`) the same routes accept
+Twilio's `application/x-www-form-urlencoded` callback and verify `X-Twilio-Signature`
+(HMAC-SHA1 over the public URL plus the sorted parameters, base64). An unsigned or mismatched request
+is refused with `401` before any parsing. The URL used for the check is `TWILIO_WEBHOOK_URL` when set
+(behind a proxy `request.url` is the internal address) and `str(request.url)` otherwise. The provider
+that decides the verification is the one configured **for that channel**, so a deployment can run
+Meta for WhatsApp and Twilio for SMS without either callback skipping verification. Status callbacks
+map to delivery receipts; inbound SMS runs through the same extraction pipeline as email.
+
 **Inbox.** `GET /inbox` groups messages by (RFQ, supplier) thread, not by channel, so a WhatsApp reply
 appears next to the email that started the thread. `reply_channel` is the channel of the supplier's
 last inbound message; `POST /inbox/threads/{id}/reply` sends there unless `channel` is passed. A
@@ -375,7 +384,7 @@ The table below is generated from the live OpenAPI schema of the running applica
 | POST | `/api/v1/extractions/{extraction_id}/fields/{field_id}/verify` | One-click field verification | rfq |
 | POST | `/api/v1/extractions/{extraction_id}/request-missing-info` | Ask the supplier for missing data | rfq |
 | POST | `/api/v1/extractions/{extraction_id}/verify` | Verify the whole extraction and unlock comparison | rfq |
-| POST | `/api/v1/inbound/{channel}` | Inbound webhook (email/WhatsApp) with signature verification | rfq |
+| POST | `/api/v1/inbound/{channel}` | Inbound webhook (email / WhatsApp / SMS) with signature verification | rfq |
 | GET | `/api/v1/inbox` | Unified conversation inbox across every channel | channels |
 | GET | `/api/v1/inbox/search` | Search every message on every channel | channels |
 | GET | `/api/v1/inbox/threads/{thread_id}` | One conversation across all channels | channels |
@@ -534,9 +543,13 @@ and treat a missing `pong` as a dead socket. The SPA reconnects with capped expo
 (1/2/4/8/15/30 s) plus jitter, and immediately when the tab becomes visible again — the socket is a
 convenience on top of the polling queries, never a dependency.
 
-The hub is in-process (one room per tenant, `GET /metrics`-friendly `hub.connection_count()`).
-Behind multiple API replicas run a single WS-serving deployment or add a Redis pub/sub fan-out —
-that is the documented scale-out point. `scripts/load_test.py` exercises 42 concurrent sockets.
+The hub keeps one room per tenant. **Fan-out across replicas is implemented**: every process has an
+origin id, publishes its envelope to the Redis channel `procureai:events` (after delivering locally),
+and forwards envelopes from other origins to its own sockets while skipping its own. A publish that
+cannot reach Redis still reaches the sockets of its own replica and is logged at error level.
+`WS_FANOUT_ENABLED=true` with a strict `APP_ENV` refuses to boot without a reachable `REDIS_URL`.
+`scripts/e2e_journeys.py` proves delivery to a socket on a second replica; `scripts/load_test.py`
+exercises 44 concurrent sockets on one replica.
 
 ## Pagination, filtering and sorting
 

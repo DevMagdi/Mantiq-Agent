@@ -1,10 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, Languages, MessageSquare } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Copy, Languages, MessageSquare, Plus } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeading } from "@/components/Shell";
-import { Badge, Card, EmptyState, ErrorState, LoadingBlock, Tabs, TabList, TabPanel, useToast } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  Drawer,
+  EmptyState,
+  ErrorState,
+  LoadingBlock,
+  Tabs,
+  TabList,
+  TabPanel,
+  useToast,
+} from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/session";
 import type { AppLang } from "@/i18n";
 import type { TemplateLibrary } from "@/lib/types";
 
@@ -12,8 +24,19 @@ export default function TemplatesPage() {
   const { t, i18n } = useTranslation();
   const lang = (i18n.language === "ar" ? "ar" : "en") as AppLang;
   const toast = useToast();
+  const queryClient = useQueryClient();
+  const { can } = useAuth();
   const [tab, setTab] = useState("whatsapp");
   const [copied, setCopied] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [draft, setDraft] = useState({
+    code: "",
+    channel: "whatsapp",
+    locale: "ar",
+    name: "",
+    subject: "",
+    body: "",
+  });
 
   const library = useQuery({
     queryKey: ["template-library"],
@@ -30,7 +53,19 @@ export default function TemplatesPage() {
     }
   };
 
+  const save = useMutation({
+    mutationFn: () => api.post<{ id: string; version: number }>("/api/v1/templates", draft),
+    onSuccess: (result) => {
+      toast.push(t("templates.saved", { version: result.version }), "ok");
+      setEditorOpen(false);
+      setDraft({ code: "", channel: "whatsapp", locale: "ar", name: "", subject: "", body: "" });
+      void queryClient.invalidateQueries({ queryKey: ["template-library"] });
+    },
+    onError: (error) => toast.push(errorMessage(error), "danger"),
+  });
+
   const channels = library.data?.channels ?? [];
+  const mayEdit = can("admin:templates");
 
   return (
     <div className="space-y-4">
@@ -38,7 +73,21 @@ export default function TemplatesPage() {
         eyebrow={t("templates.eyebrow")}
         title={t("templates.title")}
         subtitle={t("templates.subtitle")}
-        actions={library.data ? <Badge tone="gold">{t("templates.count", { count: library.data.total })}</Badge> : undefined}
+        actions={
+          <div className="flex items-center gap-2">
+            {library.data ? <Badge tone="gold">{t("templates.count", { count: library.data.total })}</Badge> : null}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setEditorOpen(true)}
+              disabled={!mayEdit}
+              title={mayEdit ? t("templates.newVersion") : t("templates.needsPermission")}
+            >
+              <Plus className="size-4" aria-hidden />
+              {t("templates.newVersion")}
+            </button>
+          </div>
+        }
       />
 
       {library.isLoading ? (
@@ -96,6 +145,95 @@ export default function TemplatesPage() {
           ))}
         </Tabs>
       )}
+
+      <Drawer
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={t("templates.editorTitle")}
+        description={t("templates.editorBody")}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setEditorOpen(false)}>
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={save.isPending || !draft.code || !draft.name || !draft.body}
+              onClick={() => save.mutate()}
+            >
+              {save.isPending ? t("common.loading") : t("common.save")}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="label">{t("templates.code")}</span>
+              <input
+                className="input"
+                dir="ltr"
+                value={draft.code}
+                onChange={(event) => setDraft({ ...draft, code: event.target.value })}
+                placeholder="reminder"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="label">{t("templates.name")}</span>
+              <input
+                className="input"
+                value={draft.name}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="label">{t("templates.channel")}</span>
+              <select
+                className="input"
+                value={draft.channel}
+                onChange={(event) => setDraft({ ...draft, channel: event.target.value })}
+              >
+                <option value="whatsapp">WhatsApp</option>
+                <option value="email">{t("channels.names.email", "Email")}</option>
+                <option value="voice">{t("channels.names.voice", "Voice")}</option>
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="label">{t("templates.locale")}</span>
+              <select
+                className="input"
+                value={draft.locale}
+                onChange={(event) => setDraft({ ...draft, locale: event.target.value })}
+              >
+                <option value="ar">العربية</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+          </div>
+          <label className="block text-sm">
+            <span className="label">{t("templates.subject")}</span>
+            <input
+              className="input"
+              value={draft.subject}
+              onChange={(event) => setDraft({ ...draft, subject: event.target.value })}
+            />
+          </label>
+          <div className="block text-sm">
+            <label className="label" htmlFor="template-body">
+              {t("templates.body")}
+            </label>
+            <textarea
+              id="template-body"
+              className="input min-h-40"
+              dir={draft.locale === "ar" ? "rtl" : "ltr"}
+              value={draft.body}
+              onChange={(event) => setDraft({ ...draft, body: event.target.value })}
+            />
+            <span className="mt-1 block text-2xs text-ink-subtle">{t("templates.variablesHint")}</span>
+          </div>
+        </div>
+      </Drawer>
     </div>
   );
 }

@@ -69,7 +69,11 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = "rfq@procureai.local"
-    whatsapp_provider: str = "fake"  # fake | cloud_api
+    # Production must never fall back to a fake adapter. `APP_ENV=prod|staging` makes every
+    # unconfigured provider a hard startup error (see app/core/providers.py); the flag below is the
+    # only way to opt out, and it exists for local demos, not for deployments.
+    allow_fake_providers: bool = False
+    whatsapp_provider: str = "fake"  # fake | cloud_api | twilio
     whatsapp_token: str = ""
     whatsapp_phone_id: str = ""
     whatsapp_verify_token: str = "verify-me"
@@ -88,6 +92,21 @@ class Settings(BaseSettings):
     telephony_sid: str = ""
     telephony_token: str = ""
     telephony_from: str = ""
+    # Twilio is one account for voice, WhatsApp and SMS. The canonical variables are TWILIO_*; the
+    # older TELEPHONY_* names are kept as aliases so an existing deployment does not break.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_whatsapp_from: str = ""   # e.g. whatsapp:+14155238886
+    twilio_sms_from: str = ""        # e.g. +14155238886
+    # The public URL Twilio signs (behind a proxy the request URL is the internal one, which would
+    # make every signature check fail). e.g. https://api.example.com/api/v1/inbound/whatsapp
+    twilio_webhook_url: str = ""
+    # Point every Twilio call at a gateway or a regional edge (default https://api.twilio.com).
+    twilio_base_url: str = "https://api.twilio.com"
+    sms_provider: str = "fake"       # fake | twilio
+    # Live updates fan out through Redis pub/sub so every replica sees every event. Disabling this
+    # is only correct for a single process; the startup check refuses it in prod/staging.
+    ws_fanout_enabled: bool = True
     ocr_provider: str = "fake"  # fake | tesseract
     stt_provider: str = "fake"  # fake | whisper
     payment_provider: str = "fake"  # fake | stripe
@@ -116,6 +135,23 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env.lower() in {"prod", "production"}
+
+    @property
+    def strict_providers(self) -> bool:
+        """True when a missing credential must stop the process instead of degrading to a fake.
+
+        Dev and test keep the deterministic fakes; staging and production do not. The escape hatch
+        (`ALLOW_FAKE_PROVIDERS=true`) is explicit and logged at startup so a deployment can never
+        arrive here by accident.
+        """
+        if self.allow_fake_providers:
+            return False
+        return self.app_env.lower() in {"prod", "production", "staging"}
+
+    def twilio_credentials(self) -> tuple[str, str]:
+        """TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN, with the legacy TELEPHONY_* names as aliases."""
+        return (self.twilio_account_sid or self.telephony_sid,
+                self.twilio_auth_token or self.telephony_token)
 
     @property
     def cors_origin_list(self) -> list[str]:

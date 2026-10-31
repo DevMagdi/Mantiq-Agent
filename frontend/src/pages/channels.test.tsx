@@ -434,4 +434,40 @@ describe("template library", () => {
     expect(screen.getByText("Reminder for {{rfq_code}}: deadline {{deadline}}")).toBeTruthy();
     expect(screen.getByText("{{rfq_code}}")).toBeTruthy();
   });
+
+  it("keeps the editor closed to roles that cannot administer templates", async () => {
+    apiMock.get.mockResolvedValue(templateLibrary);
+    render(wrap(<TemplatesPage />));
+
+    const button = (await screen.findByRole("button", { name: /new version/i })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("title")).toMatch(/permission/i);
+  });
+
+  it("saves a new version through the editor", async () => {
+    state.permissions = [...state.permissions, "admin:templates"];
+    apiMock.get.mockResolvedValue(templateLibrary);
+    apiMock.post.mockResolvedValue({ id: "tpl-9", version: 3 });
+    render(wrap(<TemplatesPage />));
+
+    fireEvent.click(await screen.findByRole("button", { name: /new version/i }));
+    fireEvent.change(screen.getByLabelText("Code"), { target: { value: "reminder" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reminder v3" } });
+    fireEvent.change(screen.getByLabelText("Body"), {
+      target: { value: "Hello {{supplier_name}}" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenCalledWith("/api/v1/templates", {
+        code: "reminder",
+        channel: "whatsapp",
+        locale: "ar",
+        name: "Reminder v3",
+        subject: "",
+        body: "Hello {{supplier_name}}",
+      }),
+    );
+    expect(await screen.findByText("Version 3 saved")).toBeTruthy();
+  });
 });

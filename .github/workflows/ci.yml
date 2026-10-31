@@ -64,6 +64,11 @@ jobs:
           assert rate >= 80, f"coverage {rate:.1f}% is below the 80% floor"
           PY
 
+      - name: End-to-end journeys against two real replicas and a real Redis
+        env:
+          SECRET_KEY: ci-secret-key-0123456789abcdef0123456789
+        run: python ../scripts/e2e_journeys.py
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -166,6 +171,8 @@ jobs:
         run: npm run lint
       - name: Unit / component tests
         run: npm run test
+      - name: Browser tests compile (strict)
+        run: npm run e2e:typecheck
       - name: Production build
         run: npm run build
 

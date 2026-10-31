@@ -16,6 +16,7 @@ from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.errors import RateLimited, install_error_handlers
 from app.core.logging import configure_logging
+from app.core.providers import assert_ready
 from app.core.rate_limit import enforce as rate_enforce
 from app.core.rate_limit import retry_after_seconds as rate_retry_after
 from app.db.session import SessionLocal, engine
@@ -55,6 +56,21 @@ def _assert_supported_database() -> None:
 async def lifespan(app: FastAPI):
     log.info("starting ProcureAI api env=%s", settings.app_env)
     _assert_supported_database()
+    # Provider credentials are part of "can this process serve traffic": in staging/production a
+    # missing Twilio/LLM/SMTP credential stops the boot with an actionable message instead of
+    # silently falling back to a fake that would never contact a supplier.
+    assert_ready(settings)
+    from app.core.providers import warnings as provider_warnings
+
+    for warning in provider_warnings(settings):
+        log.warning("provider note: %s", warning)
+    # Live updates: every replica must see every event, so the bus subscribes before serving.
+    from app.api.ws import hub
+    from app.services.events import bus
+
+    bus.attach_local(hub.broadcast_local)
+    await bus.start(settings.redis_url,
+                    required=settings.ws_fanout_enabled and settings.strict_providers)
     try:
         await run_migrations()
     except Exception:  # pragma: no cover - migration tooling optional in tests
@@ -77,6 +93,9 @@ async def lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - demo data must not crash dev servers
             log.exception("demo seed failed at startup")
     yield
+    from app.services.events import bus as _bus
+
+    await _bus.stop()
     await engine.dispose()
     log.info("shutdown complete")
 

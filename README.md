@@ -9,7 +9,7 @@ order.
 > No autonomous acceptance, signing or payment. Human approval is mandatory before any award.
 
 ```
-backend/   FastAPI + SQLAlchemy 2 (async) + Alembic + Celery  — 146 API operations
+backend/   FastAPI + SQLAlchemy 2 (async) + Alembic + Celery  — 207 API operations
 frontend/  React 18 + Vite + TypeScript (strict) + Tailwind  — bilingual AR (RTL) / EN
 deploy/    Dockerfiles, compose stack (Postgres 16, Redis, MinIO, OTel), Helm chart
 docs/      Architecture, decisions, traceability, security, runbook, API, design system, agent design
@@ -59,18 +59,25 @@ Docker stack instead: `cd deploy && cp .env.example .env && docker compose up -d
 ## Verify it
 
 ```bash
-cd backend && pytest tests -q --cov=app        # 513 tests, 85% line coverage
-cd backend && ruff check app tests
-cd backend && alembic upgrade head && alembic check
-cd frontend && npm run typecheck && npm run lint && npm run test && npm run build
+# from the repository root
+(cd backend && pytest tests -q --cov=app)       # 731 tests, 88 % line coverage
+(cd backend && ruff check app tests)
+(cd backend && alembic upgrade head && alembic check)
+(cd frontend && npm run typecheck && npm run lint && npm run test && npm run build)
+python scripts/e2e_journeys.py                  # 13 journeys: two replicas, real Redis, vendor-shaped
+                                                # Twilio + Anthropic servers, WebSocket fan-out
+(cd frontend && npm run e2e:typecheck)          # Playwright suite compiles (see docs/E2E.md)
 ```
+
+In `APP_ENV=staging|production` a fake provider on a critical path is a **startup error** listing the
+missing variables — the platform never quietly runs a demo adapter. See `docs/ENVIRONMENT.md`.
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layers, data model, tenancy, agent runtime, topology |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 30 architecture decisions with rationale |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 113 architecture decisions with rationale |
 | [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) | FR/NFR/AC → code → test, with honest status |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, controls, PII, AI safety, operator checklist |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | install, upgrade, jobs, monitoring, incident playbooks |
@@ -78,6 +85,8 @@ cd frontend && npm run typecheck && npm run lint && npm run test && npm run buil
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | tokens, typography, RTL, accessibility, components |
 | [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | graph, tool registry, policy engine, guardrails, evals |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | what is done, partial, or deliberately absent |
+| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) | every environment variable, what it needs and what fails without it |
+| [`docs/E2E.md`](docs/E2E.md) | the two end-to-end layers: headless journeys and the browser suite |
 
 ## Safety commitments
 
