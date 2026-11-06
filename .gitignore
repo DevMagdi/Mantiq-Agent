@@ -39,6 +39,7 @@ coverage/
 *.tsbuildinfo
 test-results/
 playwright-report/
+blob-report/
 
 # ---------------------------------------------------------------- os noise
 .DS_Store
