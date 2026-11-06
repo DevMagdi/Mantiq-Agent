@@ -8,6 +8,11 @@ version = "1.0.0"
 description = "ProcureAI - AI Procurement Agent Platform (Mantiq Technologies)"
 requires-python = ">=3.11"
 dependencies = [
+  # Tracing (off unless OTEL_ENABLED=true): SDK + OTLP/HTTP exporter + FastAPI/SQLAlchemy instrumentors.
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
+  "opentelemetry-instrumentation-fastapi>=0.48b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "sqlalchemy[asyncio]>=2.0",
@@ -24,6 +29,7 @@ dependencies = [
   # Arabic shaping for the PO PDF: reportlab shapes through HarfBuzz, which it only does when this
   # wheel is importable. Apache-2.0 (bundles HarfBuzz, Old-MIT).
   "uharfbuzz>=0.39",
+  "boto3>=1.34",
   "python-multipart>=0.0.9",
   "celery>=5.4,<6",
   "redis>=5,<6",
@@ -41,6 +47,8 @@ dev = [
   # A real redis-server for the fan-out proof and scripts/e2e_journeys.py. It ships a prebuilt
   # binary, so CI does not need a Redis service to test multi-replica delivery.
   "redislite>=6.2",
+  # In-process Redis for the shared rate-limiter tests (same wire semantics as redis-server).
+  "fakeredis>=2.23",
 ]
 
 [project.scripts]

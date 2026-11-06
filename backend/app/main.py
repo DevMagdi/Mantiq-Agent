@@ -135,6 +135,9 @@ def create_app(*, accounting_enabled: bool | None = None) -> FastAPI:
                                prefix=settings.api_prefix)
     application.include_router(ws_router)
     _install_system_routes(application)
+    from app.core.observability import setup_observability
+
+    setup_observability(application)
     return application
 
 
@@ -167,6 +170,9 @@ def _install_system_routes(application: FastAPI) -> None:
             "# HELP procureai_ws_connections Active websocket connections\n"
             "# TYPE procureai_ws_connections gauge\n"
             f"procureai_ws_connections {hub.connection_count()}\n"
+            "# HELP procureai_ws_slow_disconnects_total Sockets dropped for falling behind on frames\n"
+            "# TYPE procureai_ws_slow_disconnects_total counter\n"
+            f"procureai_ws_slow_disconnects_total {hub.slow_disconnects}\n"
         )
         return Response(body, media_type="text/plain; version=0.0.4")
 
@@ -176,7 +182,7 @@ async def request_context(request: Request, call_next):  # noqa: ANN001
     request.state.request_id = request_id
     started = time.perf_counter()
     try:
-        rate_enforce(request)
+        await rate_enforce(request)
     except RateLimited as exc:
         retry_after = str(rate_retry_after(exc))
         return JSONResponse(

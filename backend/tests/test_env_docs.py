@@ -21,6 +21,13 @@ ENV_EXAMPLE = ROOT / "deploy" / ".env.example"
 #: Read by the compose file / collector sidecar, never by `Settings`.
 COMPOSE_ONLY = {"POSTGRES_PASSWORD", "OTEL_EXPORTER_OTLP_ENDPOINT"}
 
+#: Read directly by the `procureai live-smoke` CLI (app/live_smoke.py), never by `Settings`: they are
+#: one-shot go-live probe inputs, not deployment configuration.
+CLI_ONLY = {"LIVE_SMOKE_EMAIL_TO", "LIVE_SMOKE_WHATSAPP_TO", "LIVE_SMOKE_CALL_TO",
+            "LIVE_SMOKE_WHATSAPP_TEMPLATE", "LIVE_SMOKE_WHATSAPP_TEMPLATE_VARS",
+            "LIVE_SMOKE_IMAP_HOST", "LIVE_SMOKE_IMAP_USER", "LIVE_SMOKE_IMAP_PASSWORD",
+            "LIVE_SMOKE_QUERY"}
+
 ENV_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=", re.M)
 
 
@@ -40,7 +47,7 @@ def test_every_setting_is_documented() -> None:
 
 
 def test_the_env_template_is_a_subset_of_the_settings() -> None:
-    known = {name.upper() for name in Settings.model_fields} | COMPOSE_ONLY
+    known = {name.upper() for name in Settings.model_fields} | COMPOSE_ONLY | CLI_ONLY
     declared = set(ENV_LINE.findall(ENV_EXAMPLE.read_text(encoding="utf-8")))
     unknown = sorted(declared - known)
     assert not unknown, f"deploy/.env.example declares variables nothing reads: {unknown}"

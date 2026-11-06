@@ -130,6 +130,8 @@ def test_a_configured_twilio_account_builds_the_real_clients(clean_settings):
     clean_settings.setattr(settings, "telephony_from", "+14155238886")
     clean_settings.setattr(settings, "stt_provider", "whisper")
     clean_settings.setattr(settings, "llm_base_url", "https://api.openai.com/v1")
+    # Object storage is critical in a strict deployment too.
+    clean_settings.setattr(settings, "aws_storage_bucket", "procureai-ci")
 
     whatsapp = registry.resolve("whatsapp")
     sms = registry.resolve("sms")
@@ -179,5 +181,5 @@ def test_requirements_name_the_variables_for_every_selected_provider(clean_setti
     table = {requirement.adapter: requirement.env for requirement in requirements()}
 
     assert set(table["whatsapp"]) == {"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"}
-    assert set(table["llm"]) == {"LLM_API_KEY", "LLM_BASE_URL"}
+    assert set(table["llm"]) == {"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"}
     assert table["email"] == ("SMTP_HOST",)

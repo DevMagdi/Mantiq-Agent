@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import typer
 from sqlalchemy import select
@@ -170,6 +171,56 @@ def fx_refresh():
     typer.echo(json.dumps(_run(_inner()), indent=2))
 
 
+@app.command("live-smoke")
+def live_smoke(
+    confirm: bool = typer.Option(False, "--confirm",
+                                 help="Actually send real messages / place a real call / write a real object. "
+                                      "Without this flag the command only prints what it would do and exits 2."),
+    only: str = typer.Option("", "--only", help="Comma-separated subset: llm,email,whatsapp,telephony,storage,search"),
+    email_to: str = typer.Option("", "--email-to", help="Recipient mailbox for the live email test "
+                                                         "(or LIVE_SMOKE_EMAIL_TO)"),
+    whatsapp_to: str = typer.Option("", "--whatsapp-to", help="Your own WhatsApp number, E.164 "
+                                                               "(or LIVE_SMOKE_WHATSAPP_TO)"),
+    call_to: str = typer.Option("", "--call-to", help="Your own number for the live voice call "
+                                                       "(or LIVE_SMOKE_CALL_TO; requires VOICE_AI_ENABLED=true)"),
+    timeout: int = typer.Option(60, "--timeout", help="Seconds to wait for delivery/settle"),
+):
+    """Call every *configured real vendor* once and report what happened. Sends real traffic.
+
+    This is the go-live gate: run it against the production deployment before any tenant traffic is
+    routed to it. It never prints secret values. A check whose vendor is still a fake is a FAIL in a
+    strict (staging/production) deployment and a SKIP elsewhere.
+    """
+    from app.live_smoke import ALL_CHECKS, run_checks
+
+    selected = [part.strip().lower() for part in only.split(",") if part.strip()] if only else list(ALL_CHECKS)
+    unknown = [part for part in selected if part not in ALL_CHECKS]
+    if unknown:
+        typer.echo(f"unknown check(s): {', '.join(unknown)} — valid: {', '.join(ALL_CHECKS)}", err=True)
+        raise typer.Exit(code=2)
+
+    if not confirm:
+        typer.echo("Refusing to run without --confirm. This command sends real messages, may place a "
+                   "real phone call, and writes a real object to your bucket.\n"
+                   f"APP_ENV={settings.app_env}  selected checks: {', '.join(selected)}\n"
+                   "Re-run with --confirm (and --email-to/--whatsapp-to/--call-to as needed).")
+        raise typer.Exit(code=2)
+
+    results = _run(run_checks(only=selected,
+                              email_to=email_to or os.environ.get("LIVE_SMOKE_EMAIL_TO", ""),
+                              whatsapp_to=whatsapp_to,
+                              call_to=call_to,
+                              timeout_s=timeout))
+    for result in results:
+        line = f"[{result.status:4}] {result.name:10} {result.detail}"
+        typer.echo(line)
+    failed = [r for r in results if r.status == "FAIL"]
+    typer.echo(json.dumps({"results": [r.as_dict() for r in results],
+                           "failed": [r.name for r in failed]}, indent=2))
+    if failed:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def doctor():
     """Report what this process actually resolved: database, extensions, adapters, live events.
@@ -206,8 +257,6 @@ def doctor():
             db["connectivity"] = f"failed: {type(exc).__name__}"
         return db
 
-    _run(_check())
-
     selected = {
         "whatsapp": settings.whatsapp_provider,
         "sms": settings.sms_provider,
@@ -220,6 +269,24 @@ def doctor():
         "erp": settings.erp_provider,
         "payment": settings.payment_provider,
     }
+    from app.core import rate_limit as _rate_limit
+
+    async def _redis_status() -> dict[str, object]:
+        if not settings.redis_url:
+            return {"configured": False, "mode": "single-replica (in-process live events)"}
+        try:
+            import redis.asyncio as aioredis
+
+            client = aioredis.from_url(settings.redis_url, socket_connect_timeout=2)
+            await asyncio.wait_for(client.ping(), timeout=2)
+            await client.aclose()
+            return {"configured": True, "mode": "redis", "reachable": True}
+        except Exception as exc:  # noqa: BLE001 - doctor reports, never crashes
+            return {"configured": True, "mode": "redis", "reachable": False,
+                    "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+    _run(_check())
+    redis_status = _run(_redis_status())
     fakes = providers.fake_selections(settings)
     critical_fakes = providers.critical_fake_selections(settings)
     problems = providers.problems(settings)
@@ -243,11 +310,21 @@ def doctor():
         "critical_fakes": critical_fakes,
         "missing_credentials": problems,
         "ws_fanout_enabled": settings.ws_fanout_enabled,
+        "redis": redis_status,
         "redis_configured": bool(settings.redis_url),
+        "rate_limit_backend": _rate_limit.backend_name(),
+        "storage": {"bucket": settings.aws_storage_bucket or "local-disk",
+                    "mode": "s3" if settings.aws_storage_bucket else "local",
+                    "endpoint": settings.aws_endpoint or ("aws-default" if settings.aws_storage_bucket else "")},
+        "accounting_enabled": settings.accounting_enabled,
+        "sso": {"enabled": bool(getattr(settings, "sso_enabled", False)),
+                "issuer": getattr(settings, "oidc_issuer_url", "") or None},
         "bootstrap_on_start": settings.bootstrap_on_start,
         "public_url": settings.public_app_url,
         "note": ("Every adapter is real." if not fakes else
-                 "Adapters listed under 'fakes' run in sandbox mode with deterministic data."),
+                 ("APP_ENV is strict: the deployment must NOT boot with these fakes "
+                  "(see missing_credentials / critical_fakes)." if settings.strict_providers else
+                  "Adapters listed under 'fakes' run in sandbox mode with deterministic data.")),
     }
     typer.echo(json.dumps(payload, indent=2, default=str))
     if settings.strict_providers and (problems or critical_fakes):

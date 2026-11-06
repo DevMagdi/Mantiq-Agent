@@ -25,7 +25,7 @@ import VoiceCallsPage from "./pages/VoiceCallsPage";
 import AssistantPage from "./pages/AssistantPage";
 import PublicFormPage from "./pages/PublicFormPage";
 import PublicPortalPage from "./pages/PublicPortalPage";
-import NotFoundPage from "./pages/NotFoundPage";
+import NotFoundPage, { NotFoundContent } from "./pages/NotFoundPage";
 
 /**
  * A screen that only exists when the deployment has the capability behind it.
@@ -163,6 +163,8 @@ export default function App() {
               <SettingsPage />
             </RequirePermission>
           } />
+        {/* Unknown URLs keep the shell (nav stays usable); anonymous ones fall through to login. */}
+        <Route path="*" element={<NotFoundContent />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

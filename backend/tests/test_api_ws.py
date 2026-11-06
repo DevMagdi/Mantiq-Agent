@@ -6,6 +6,7 @@ the ping/pong path and the `type` envelope every client reads.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 from starlette.websockets import WebSocketDisconnect
@@ -33,6 +34,9 @@ class FakeWebSocket:
         self.sent.append(text)
 
     async def receive_text(self) -> str:
+        # A real receive blocks on the network, which lets the endpoint's writer task drain queued
+        # frames. Yield the loop here too, so the test observes the same send path a browser does.
+        await asyncio.sleep(0.001)
         if self._incoming:
             return self._incoming.pop(0)
         raise WebSocketDisconnect(code=1000)
@@ -75,7 +79,8 @@ async def test_broadcast_envelope_carries_type_and_event():
     ws = FakeWebSocket()
     await hub.join("tenant-b", ws)
     await hub.broadcast("tenant-b", "notification.created", {"id": "n1"})
-    frame = json.loads(ws.sent[0])
+    # Production drains this queue through the endpoint's writer task; assert on what it carries.
+    frame = json.loads(hub.queue_for(ws).get_nowait())
     assert frame["type"] == "notification.created"
     assert frame["event"] == "notification.created"
     assert frame["payload"] == {"id": "n1"}

@@ -86,9 +86,13 @@ def display_runs(text: str) -> list[tuple[str, bool]]:
 
 
 def paragraph_is_rtl(text: str) -> bool:
-    """The paragraph direction: the script of the first strong (letter) character."""
+    """The paragraph direction: the script of the first strong (letter) character.
+
+    A line with no letters at all (digits, punctuation, separators) has no strong direction: it is
+    left-to-right, like the numbers embedded inside Arabic prose.
+    """
     first_strong = next((char for char in text or "" if char.isalpha()), "")
-    return _is_arabic(first_strong)
+    return bool(first_strong) and _is_arabic(first_strong)
 
 
 def arabic_ready() -> bool:

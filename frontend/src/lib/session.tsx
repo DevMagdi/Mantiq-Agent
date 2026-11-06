@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, session as tokenStore } from "./api";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api, session as tokenStore, hasCsrfCookie, refreshSession } from "./api";
 import type { LoginResult, User } from "./types";
 
 type AuthState = {
@@ -20,15 +20,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthState["status"]>("loading");
   const [challenge, setChallenge] = useState<string | null>(null);
 
+  // Dedupe concurrent boots (React StrictMode double-mounts in development). One restore, one /me.
+  const refreshUserInFlight = useRef<Promise<void> | null>(null);
+
   const refreshUser = useCallback(async () => {
-    try {
-      const me = await api.get<User>("/api/v1/auth/me");
-      setUser(me);
-      setStatus("authenticated");
-    } catch {
-      setUser(null);
-      setStatus("anonymous");
-    }
+    refreshUserInFlight.current ??= (async () => {
+      try {
+        if (!tokenStore.get()) {
+          // Anonymous boot: no token and no session cookie — firing /auth/me would only be a
+          // doomed 401 in the console. With a cookie but no token, restore silently instead.
+          if (!hasCsrfCookie()) {
+            setUser(null);
+            setStatus("anonymous");
+            return;
+          }
+          const restored = await refreshSession();
+          if (!restored) {
+            setUser(null);
+            setStatus("anonymous");
+            return;
+          }
+        }
+        const me = await api.get<User>("/api/v1/auth/me");
+        setUser(me);
+        setStatus("authenticated");
+      } catch {
+        setUser(null);
+        setStatus("anonymous");
+      } finally {
+        refreshUserInFlight.current = null;
+      }
+    })();
+    return refreshUserInFlight.current;
   }, []);
 
   useEffect(() => {

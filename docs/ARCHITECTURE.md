@@ -148,9 +148,12 @@ with HPA, PodDisruptionBudget, secrets via `Secret` refs, and liveness/readiness
 
 * Structured JSON logs with `request_id`, route, status, latency (`app/core/logging.py`).
 * `x-request-id` is echoed on every response and stored on audit rows.
-* `/metrics` exposes Prometheus counters/histograms (requests, latency, agent runs, policy blocks).
-* An OpenTelemetry collector is part of the compose stack; tracing is opt-in via `OTEL_ENABLED`
-  (and Sentry error reporting via `SENTRY_DSN`).
+* `/metrics` exposes Prometheus counters/histograms (requests, latency, agent runs, policy blocks,
+  `procureai_ws_slow_disconnects_total`).
+* Tracing is opt-in via `OTEL_ENABLED=true`: FastAPI + SQLAlchemy auto-instrumentation exports
+  OTLP/HTTP spans (service `procureai-api`; `OTEL_EXPORTER_OTLP_ENDPOINT`). Off by default; a broken
+  exporter costs log lines, never boot (`app/core/observability.py`). Sentry error reporting via
+  `SENTRY_DSN`. The compose stack's OpenTelemetry collector is the usual endpoint.
 
 ## 9. Failure behaviour
 
@@ -161,6 +164,6 @@ with HPA, PodDisruptionBudget, secrets via `Secret` refs, and liveness/readiness
 | Adapter down (email/WhatsApp) | message row kept `failed`, retried by Celery, buyer notified |
 | Policy blocks a send | draft persisted `blocked`, buyer notified, nothing sent |
 | Migration failure at startup | logged in lifespan, process still boots to serve `/health` with a clear log |
-| Redis unavailable | rate limiting degrades to in-process counter, Celery retries |
+| Redis unavailable | shared rate limiting falls back to per-process memory with a logged warning (`procureai doctor` reports it); WS fan-out and Celery retry |
 
 Honest gaps are listed in `docs/PROGRESS.md`; they are extension points, not hidden shortcuts.

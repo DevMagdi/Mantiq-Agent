@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # (mass attempts from one host) — the per-IP cap allows a full office to arrive at 08:00.
     rate_limit_login_per_account: int = 10
     rate_limit_login_per_ip: int = 120
+    # ``memory`` is exact for one replica; ``redis`` shares one sliding window across replicas.
+    rate_limit_backend: str = "memory"
     public_base_url: str = "http://localhost:5173"
     app_name: str = "ProcureAI"
     app_env: str = "dev"  # dev | staging | prod

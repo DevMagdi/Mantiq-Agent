@@ -418,7 +418,10 @@ async def record_payment(invoice_id: str, payload: PaymentIn, ctx: Context = Dep
 @router.get("/purchase-orders/{po_id}/pdf", summary="Download the PO as PDF")
 async def po_pdf_endpoint(po_id: str, ctx: Context = Depends(require("po:export"))):
     po = await _tenant_po(ctx, po_id)
-    return Response(content=po_pdf(po.document_html, po), media_type="application/pdf",
+    rfq = (await ctx.session.execute(select(RFQ).where(RFQ.id == po.rfq_id))).scalar_one_or_none()
+    supplier = (await ctx.session.execute(select(Supplier).where(Supplier.id == po.supplier_id))).scalar_one_or_none()
+    return Response(content=po_pdf(po.document_html, po, tenant=ctx.tenant, rfq=rfq, supplier=supplier),
+                    media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{po.code}.pdf"'})
 
 

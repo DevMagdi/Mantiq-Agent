@@ -71,11 +71,13 @@ def requirements(config: Settings | None = None) -> list[Requirement]:
 
     llm = (config.llm_provider or "fake").lower()
     if llm == "anthropic":
-        reqs.append(Requirement("llm", "LLM_PROVIDER=anthropic", ("LLM_API_KEY",),
-                                "LLM_MODEL selects the model (default claude-sonnet-4-5)"))
+        reqs.append(Requirement("llm", "LLM_PROVIDER=anthropic", ("LLM_API_KEY", "LLM_MODEL"),
+                                "LLM_MODEL selects the model (e.g. claude-sonnet-4-5)"))
     elif llm in {"openai", "openai_compatible", "self_hosted"}:
-        reqs.append(Requirement("llm", f"LLM_PROVIDER={llm}", ("LLM_API_KEY", "LLM_BASE_URL"),
-                                "any OpenAI-compatible endpoint: vLLM, Ollama, Azure, OpenAI"))
+        reqs.append(Requirement("llm", f"LLM_PROVIDER={llm}", ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"),
+                                "any OpenAI-compatible endpoint: vLLM, Ollama, Azure, OpenAI. "
+                                "LLM_API_KEY is required in strict mode even for self-hosted "
+                                "endpoints without auth (use a dummy bearer token)."))
 
     if (config.email_provider or "fake").lower() == "smtp":
         reqs.append(Requirement("email", "EMAIL_PROVIDER=smtp", ("SMTP_HOST",)))
@@ -113,7 +115,9 @@ def _is_critical(name: str, config: Settings) -> bool:
 
     A fake supplier-discovery provider is harmless when nobody asked for discovery; a fake email or
     LLM provider is not, because e-mail dispatch and drafting are part of every RFQ. Voice providers
-    become critical only when the AI-voice feature is switched on.
+    become critical only when the AI-voice feature is switched on. Object storage is critical in a
+    strict deployment because uploaded quotations, extraction sources and PO PDFs are commercial
+    records — losing them (or landing them on an ephemeral local disk) is not acceptable.
     """
     if name == "EMAIL_PROVIDER":
         return True          # every RFQ has an email leg; the platform cannot be silent here
@@ -124,6 +128,24 @@ def _is_critical(name: str, config: Settings) -> bool:
     if name in {"TELEPHONY_PROVIDER", "STT_PROVIDER"}:
         return bool(config.voice_ai_enabled)
     return False             # SMS, search, OCR, payment, ERP are opt-in capabilities
+
+
+def storage_problem(config: Settings | None = None) -> str:
+    """The one critical adapter with no provider variable: object storage.
+
+    ``AWS_STORAGE_BUCKET`` is the switch — empty means local disk, which is fine for a laptop and
+    wrong for a deployment that must survive a pod restart with its documents intact. It is part of
+    the strict gate (not just a warning) so `procureai doctor` and startup agree on the answer.
+    """
+    config = config or settings
+    if not config.strict_providers:
+        return ""
+    if (config.aws_storage_bucket or "").strip():
+        return ""
+    return ("storage: AWS_STORAGE_BUCKET is not set (the deployment would write documents to "
+            "the local filesystem). Set AWS_STORAGE_BUCKET together with AWS_ENDPOINT (for "
+            "S3-compatible stores such as Cloudflare R2, GCS or MinIO), AWS_ACCESS_KEY and "
+            "AWS_SECRET_KEY — or ALLOW_FAKE_PROVIDERS=true for a deliberately minimal box.")
 
 
 def fake_selections(config: Settings | None = None) -> list[str]:
@@ -158,6 +180,9 @@ def problems(config: Settings | None = None) -> list[str]:
             hint = f" ({requirement.note})" if requirement.note else ""
             found.append(f"{requirement.adapter}: {requirement.selected_by} requires "
                          f"{', '.join(missing)}{hint}")
+    storage = storage_problem(config)
+    if storage:
+        found.append(storage)
     return found
 
 

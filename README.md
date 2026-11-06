@@ -63,13 +63,13 @@ Docker stack instead: `cd deploy && cp .env.example .env && docker compose up -d
 
 ```bash
 # from the repository root
-(cd backend && pytest tests -q --cov=app)       # 746 tests, 88 % line coverage
+(cd backend && pytest tests -q --cov=app)       # 813 tests
 (cd backend && ruff check app tests)
 (cd backend && alembic upgrade head && alembic check)
 (cd frontend && npm run typecheck && npm run lint && npm run test && npm run build)
 python scripts/e2e_journeys.py                  # 15 journeys: two replicas, real Redis, vendor-shaped
                                                 # Twilio + Anthropic servers, WebSocket fan-out
-(cd frontend && npm run e2e:typecheck)          # Playwright suite compiles (see docs/E2E.md)
+(cd frontend && npm run e2e)                   # 28 browser specs pass (Chromium; see docs/E2E.md)
 ```
 
 In `APP_ENV=staging|production` a fake provider on a critical path is a **startup error** listing the

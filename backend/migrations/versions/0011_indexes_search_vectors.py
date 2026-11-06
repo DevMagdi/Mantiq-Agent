@@ -31,18 +31,40 @@ def upgrade() -> None:
     op.create_index("ix_usage_tenant_kind_occurred", "usage_event", ["tenant_id", "kind", "occurred_at"])
     op.create_index("ix_notification_user_unread", "notification", ["user_id", "read_at"])
     if bind.dialect.name == "postgresql":
-        # Trigram search for item/supplier fuzzy matching (FR-IN-6, NFR-PERF-1).
-        op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_name_trgm ON supplier USING gin (name gin_trgm_ops)")
-        op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_name_ar_trgm ON supplier USING gin (name_ar gin_trgm_ops)")
-        op.execute("CREATE INDEX IF NOT EXISTS ix_item_name_trgm ON item USING gin (name gin_trgm_ops)")
-        op.execute("CREATE INDEX IF NOT EXISTS ix_rfq_title_trgm ON rfq USING gin (title gin_trgm_ops)")
-        # Semantic search columns (pgvector). JSON payloads stay portable for SQLite dev.
-        op.execute("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS embedding_vec vector(1536)")
-        op.execute("ALTER TABLE item ADD COLUMN IF NOT EXISTS embedding_vec vector(1536)")
-        op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_embedding_hnsw ON supplier "
-                   "USING hnsw (embedding_vec vector_cosine_ops)")
-        op.execute("CREATE INDEX IF NOT EXISTS ix_item_embedding_hnsw ON item "
-                   "USING hnsw (embedding_vec vector_cosine_ops)")
+        # Trigram search for item/supplier fuzzy matching (FR-IN-6, NFR-PERF-1). These GIN indexes
+        # are a pure performance feature; when the operator signed off on missing contrib modules
+        # (MIGRATION_ALLOW_MISSING_EXTENSIONS=1) they are skipped with a warning, and substring
+        # search falls back to seq scans + the application's Python-side similarity.
+        import logging
+        import os
+
+        available = {row[0] for row in bind.execute(
+            sa.text("SELECT name FROM pg_available_extensions")).fetchall()}
+        if "pg_trgm" not in available:
+            if os.environ.get("MIGRATION_ALLOW_MISSING_EXTENSIONS", "").strip().lower() not in {"1", "true", "yes"}:
+                raise RuntimeError("pg_trgm is not available in this PostgreSQL; install "
+                                   "postgresql-contrib or set MIGRATION_ALLOW_MISSING_EXTENSIONS=1.")
+            logging.getLogger("alembic.env").warning(
+                "pg_trgm unavailable — skipping the four trigram GIN indexes; fuzzy search stays correct, "
+                "just slower")
+        else:
+            op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_name_trgm ON supplier USING gin (name gin_trgm_ops)")
+            op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_name_ar_trgm ON supplier USING gin (name_ar gin_trgm_ops)")
+            op.execute("CREATE INDEX IF NOT EXISTS ix_item_name_trgm ON item USING gin (name gin_trgm_ops)")
+            op.execute("CREATE INDEX IF NOT EXISTS ix_rfq_title_trgm ON rfq USING gin (title gin_trgm_ops)")
+        if "vector" not in available:
+            if os.environ.get("MIGRATION_ALLOW_MISSING_EXTENSIONS", "").strip().lower() not in {"1", "true", "yes"}:
+                raise RuntimeError("pgvector is not available in this PostgreSQL; install the vector "
+                                   "extension or set MIGRATION_ALLOW_MISSING_EXTENSIONS=1.")
+            logging.getLogger("alembic.env").warning("pgvector unavailable — skipping embedding columns")
+        else:
+            # Semantic search columns (pgvector). JSON payloads stay portable for SQLite dev.
+            op.execute("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS embedding_vec vector(1536)")
+            op.execute("ALTER TABLE item ADD COLUMN IF NOT EXISTS embedding_vec vector(1536)")
+            op.execute("CREATE INDEX IF NOT EXISTS ix_supplier_embedding_hnsw ON supplier "
+                       "USING hnsw (embedding_vec vector_cosine_ops)")
+            op.execute("CREATE INDEX IF NOT EXISTS ix_item_embedding_hnsw ON item "
+                       "USING hnsw (embedding_vec vector_cosine_ops)")
 
 
 def downgrade() -> None:

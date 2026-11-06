@@ -26,10 +26,13 @@ path is refused at boot with the exact variable names, and never falls back sile
 | `ALLOW_FAKE_PROVIDERS` | `false` | Deliberately run a staging box on the deterministic fakes. Logs a warning per provider. |
 | `WS_FANOUT_ENABLED` | `true` | Live events are published to Redis and fanned out to every replica's WebSocket clients. Turning it off is a single-replica-only mode; with it on, an unreachable Redis stops the API from starting rather than silently dropping live updates. |
 
-Critical providers (a fake is fatal in `staging`/`production`): `EMAIL_PROVIDER`, `LLM_PROVIDER`,
+Critical providers (a fake is fatal in `staging`/`production`): `EMAIL_PROVIDER`, `LLM_PROVIDER`
+(including `LLM_MODEL` — a model must be named explicitly, never defaulted),
 `WHATSAPP_PROVIDER` when `WHATSAPP_ENABLED=true`, `TELEPHONY_PROVIDER` and `STT_PROVIDER` when
-`VOICE_AI_ENABLED=true`. Everything else (SMS, search, OCR, ERP, payment) is an opt-in capability and
-only produces a startup warning.
+`VOICE_AI_ENABLED=true`. **Object storage is also critical**: with `AWS_STORAGE_BUCKET` empty a
+strict deployment refuses to boot, because documents would land on an ephemeral local disk.
+Everything else (SMS, search, OCR, ERP, payment) is an opt-in capability and only produces a
+startup warning.
 
 ### 2.1 Runtime integrations (no `.env` edit)
 
@@ -98,8 +101,8 @@ never reaches the extraction pipeline.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `LLM_PROVIDER` | yes in prod | `anthropic` \| `openai_compatible` (OpenAI, vLLM, Ollama, LM Studio, any `/v1/chat/completions`) \| `fake` (dev/test). |
-| `LLM_MODEL` | yes | Exact model id, e.g. `claude-sonnet-4-5-20250929` or `gpt-4.1`. Never hard-coded. |
-| `LLM_API_KEY` | yes | Anthropic key or bearer token. A self-hosted endpoint may leave it empty **only** if the server needs no auth; set `LLM_PROVIDER=openai_compatible` and no key. |
+| `LLM_MODEL` | yes (strict) | Exact model id, e.g. `claude-sonnet-4-5-20250929` or `gpt-4.1`. Required at boot in staging/production — the startup check refuses to run without one. Never hard-coded. |
+| `LLM_API_KEY` | yes (strict) | Anthropic key or bearer token. In strict mode a self-hosted endpoint without auth is not accepted; set any non-empty bearer token instead. |
 | `LLM_BASE_URL` | for self-hosted/proxy | Anthropic: a gateway in front of `/v1/messages` (default `https://api.anthropic.com`). OpenAI-compatible: **include the version segment**, e.g. `https://api.openai.com/v1` or `http://vllm:8000/v1`. |
 
 Per-tenant overrides (provider, model, base URL, encrypted key, monthly token budget) are managed in
@@ -117,7 +120,7 @@ or `response_format=json_object` (OpenAI) and validate the answer against the ta
 | `SEARCH_PROVIDER` + `SEARCH_API_KEY` | `fake` \| `serpapi` \| `brave` | Supplier discovery. |
 | `WHATSAPP_APP_SECRET` | Meta app secret | `cloud_api` webhook payload signature. |
 | `WHATSAPP_QUOTE_FLOW_ID` | Flow id | Structured quote form; without it an approved template is used. |
-| `AWS_STORAGE_BUCKET` (+ `AWS_ENDPOINT`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`) | empty \| bucket name | Unset = local disk storage; set = S3/MinIO. |
+| `AWS_STORAGE_BUCKET` (+ `AWS_ENDPOINT`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`) | empty (dev) \| bucket name | **Critical in staging/production**: empty bucket = local disk = boot failure. S3, Cloudflare R2, GCS (S3-interop) and MinIO are supported; `AWS_ENDPOINT` selects a non-AWS gateway (path-style addressing is used). The bucket must already exist; the application never creates it. |
 | `OCR_PROVIDER` | `fake` \| `tesseract` | Scanned quotations (the container image ships `tesseract-ocr` with `ara`). |
 | `STT_PROVIDER` | `fake` \| `whisper` | Reuses `LLM_BASE_URL` / `LLM_API_KEY`, i.e. any Whisper-compatible endpoint. |
 | `ERP_PROVIDER` | `file` \| `odoo` | Accounting export. |
@@ -166,6 +169,7 @@ deployment is still missing a credential — it never prints a secret value, onl
 | `RATE_LIMIT_ANONYMOUS_PER_MINUTE` | `600` | Unauthenticated requests per minute per IP. |
 | `RATE_LIMIT_LOGIN_PER_ACCOUNT` | `10` | Failed logins per minute per account before the account is throttled. |
 | `RATE_LIMIT_LOGIN_PER_IP` | `120` | Failed logins per minute per IP. |
+| `RATE_LIMIT_BACKEND` | `memory` | `memory` = per-process buckets (exact for one replica); `redis` = one shared sliding window across replicas (needs `REDIS_URL`); falls back to memory with a logged warning when Redis is unreachable. |
 
 ### 7.3 Database pool and isolation
 
@@ -200,9 +204,38 @@ deployment is still missing a credential — it never prints a secret value, onl
 
 ### 7.6 Storage
 
-`AWS_STORAGE_BUCKET` unset keeps media on local disk (`./media`). Set it — together with
-`AWS_ENDPOINT`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` — to use S3 or MinIO; the bucket must already
-exist, the application never creates it.
+`AWS_STORAGE_BUCKET` unset keeps media on local disk — allowed in dev/test, a **boot failure** in
+staging/production. Set it — together with `AWS_ENDPOINT`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` — to
+use S3, Cloudflare R2, GCS (S3 API interop) or MinIO; the bucket must already exist, the application
+never creates it. Non-AWS gateways are contacted with path-style addressing. The adapter exposes
+`signed_url()` for expiring, single-purpose object links and `delete()` for retention purges.
+
+## 8. `procureai live-smoke` — the go-live gate
+
+After `doctor` is green, `procureai live-smoke --confirm` makes **one real call per configured
+vendor** and reports PASS/FAIL/SKIP per check. It sends real traffic (a real email, a real WhatsApp
+message, optionally a real phone call), so it never runs without `--confirm`, and it never prints
+secret values.
+
+```bash
+procureai live-smoke --confirm \
+  --email-to ops@your-company.com --whatsapp-to +201234567890 [--call-to +201234567890]
+# subset: procureai live-smoke --confirm --only llm,email
+```
+
+| Check | What it does | Receipt proof |
+| --- | --- | --- |
+| `llm` | One completion against the configured model; asserts response shape and `tokens_in > 0` (the number the billing pipeline records) | vendor response |
+| `email` | Sends a marked message over SMTP/STARTTLS | IMAP polling when `LIVE_SMOKE_IMAP_HOST`/`LIVE_SMOKE_IMAP_USER`/`LIVE_SMOKE_IMAP_PASSWORD` are set; otherwise reports "receipt not verified" explicitly |
+| `whatsapp` | Sends a session text (or the approved template named in `LIVE_SMOKE_WHATSAPP_TEMPLATE` with `LIVE_SMOKE_WHATSAPP_TEMPLATE_VARS`) to `LIVE_SMOKE_WHATSAPP_TO` | vendor accepts (`provider_message_id`); delivery receipts arrive on the inbound webhook |
+| `telephony` | With `VOICE_AI_ENABLED=true`, places a short disclosure-first call to `LIVE_SMOKE_CALL_TO` and polls the call resource until it settles | Twilio call status; a `no-answer` is an honest PASS with the status reported |
+| `storage` | PUT → GET → HEAD → presigned-GET (fetched over HTTP) → DELETE on `AWS_STORAGE_BUCKET` | bytes must round-trip exactly |
+| `search` | One live query (`LIVE_SMOKE_QUERY`, default "steel suppliers Egypt") | ≥ 1 result returned |
+
+In a strict (staging/production) deployment a check whose vendor is still a fake is a **FAIL**, not a
+SKIP — that is the whole point of the gate. Exit code: `0` all selected checks passed, `1` at least
+one failed, `2` usage error (including a missing `--confirm`). The command is an operator tool; CI
+does not run it because it needs real vendor accounts.
 
 ### 7.7 Compose-only variables
 

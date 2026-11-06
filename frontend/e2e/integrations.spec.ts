@@ -54,7 +54,7 @@ test.describe("integrations", () => {
     await page.reload();
     await page.getByRole("tab", { name: /Integrations|التكاملات/ }).click();
 
-    const card = page.locator("div").filter({ hasText: /Supplier discovery|استكشاف الموردين/ }).last();
+    const card = page.locator("section.card").filter({ hasText: /Supplier discovery|استكشاف الموردين/ });
     await card.getByLabel(/Provider|المزوّد/).selectOption("brave");
     await card.getByRole("button", { name: /^Save$|^حفظ$/ }).click();
 
@@ -85,12 +85,17 @@ test.describe("integrations", () => {
     await page.reload();
     await page.getByRole("tab", { name: /Integrations|التكاملات/ }).click();
 
-    const emailCard = page.locator("div").filter({ hasText: /^Email|البريد الإلكتروني/ }).last();
+    const emailCard = page.locator("section.card").filter({ hasText: /^Email|البريد الإلكتروني/ });
     await emailCard.getByRole("button", { name: /Disable|تعطيل/ }).click();
     await expect(emailCard.getByText(/Disabled|معطّل/)).toBeVisible();
 
     await emailCard.getByRole("button", { name: /Enable|تفعيل/ }).click();
-    await expect(emailCard.getByText(/Error|خطأ/)).toBeVisible();
+    await expect(emailCard.getByText(/Live|يعمل فعليًا/)).toBeVisible();
+
+    // The badge is honest about configuration, not about reachability: only the Test button makes a
+    // real vendor call. This box is deliberately unreachable, so the probe must report Error.
+    await emailCard.getByRole("button", { name: /Test connection|اختبار الاتصال/ }).click();
+    await expect(emailCard.getByText(/Error|خطأ/).first()).toBeVisible({ timeout: 30_000 });
 
     await page.request.delete("/api/v1/integrations/email", {
       headers: { authorization: `Bearer ${token}` },
