@@ -237,16 +237,18 @@ jobs:
         working-directory: frontend
         run: npm run e2e:local
 
-      - name: Dump Playwright failure diagnostics into this log
+      # Emits one ::error:: workflow command per failing spec so the failures surface as
+      # check-run annotations (visible via the API even where job logs are not downloadable).
+      - name: Annotate Playwright failure diagnostics
         if: failure()
         working-directory: frontend
         run: |
           shopt -s nullglob
           for dir in test-results/*/; do
-            echo "=================================================================="
-            echo "== $dir"
-            cat "$dir/error-context.md" 2>/dev/null | head -80
-            cat "$dir/test-failed-1.png" > /dev/null 2>&1 && echo "(screenshot: $dir/test-failed-1.png)"
+            [ -f "$dir/error-context.md" ] || continue
+            name=$(basename "$dir")
+            ctx=$(head -40 "$dir/error-context.md" | tr -d '\r' | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/%0A/g')
+            echo "::error title=$name::$ctx"
           done
 
       - uses: actions/upload-artifact@v4
