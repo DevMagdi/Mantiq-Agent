@@ -53,6 +53,11 @@ function readCookie(name: string): string {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
 }
 
+/** Whether the double-submit cookie exists (used to decide if a session restore is worth trying). */
+export function hasCsrfCookie(): boolean {
+  return readCookie(CSRF_COOKIE) !== "";
+}
+
 export type RequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
@@ -67,7 +72,8 @@ const BASE = import.meta.env.VITE_API_BASE ?? "";
 
 let refreshInFlight: Promise<boolean> | null = null;
 
-async function refreshSession(): Promise<boolean> {
+/** Restore the session once; shared by the API client and the boot path. */
+export async function refreshSession(): Promise<boolean> {
   refreshInFlight ??= (async () => {
     try {
       const resp = await fetch(`${BASE}/api/v1/auth/refresh`, {

@@ -159,6 +159,90 @@ jobs:
           done
           python ../scripts/concurrency_check.py --base-url http://127.0.0.1:8000
 
+  e2e:
+    name: Browser E2E (Chromium against a real stack)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: procureai
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: procureai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U procureai -d procureai"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://procureai:change-me@localhost:5432/procureai
+      SECRET_KEY: ci-secret-key-0123456789abcdef0123456789
+      ENCRYPTION_MASTER_KEY: ci-only-master-key-0123456789abcdef0123456789
+      REDIS_URL: redis://localhost:6379/0
+      WS_FANOUT_ENABLED: "true"
+      RATE_LIMIT_BACKEND: redis
+      ACCOUNTING_ENABLED: "true"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Migrate, bootstrap and seed the demo tenant
+        run: |
+          alembic upgrade head
+          python -m app.cli bootstrap --demo
+          python -m app.cli seed-demo
+
+      - name: Start the API
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level warning &
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "the API never became healthy"; exit 1
+
+      - name: Install the frontend and the browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run the browser suite
+        working-directory: frontend
+        run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
   frontend:
     name: Frontend (typecheck, lint, tests, build)
     runs-on: ubuntu-latest

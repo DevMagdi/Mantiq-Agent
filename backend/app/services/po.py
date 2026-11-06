@@ -100,7 +100,7 @@ ProcureAI never sends a binding contract without human approval.</p>
 </body></html>"""
 
 
-def po_pdf(html: str, po: PurchaseOrder) -> bytes:
+def po_pdf(html: str, po: PurchaseOrder, *, tenant=None, rfq=None, supplier=None) -> bytes:
     """Render a simple, print-ready PDF (ReportLab; no external binary needed).
 
     Arabic needs more than a font: the letters must be shaped and the line must read right-to-left.
@@ -108,68 +108,166 @@ def po_pdf(html: str, po: PurchaseOrder) -> bytes:
     drawn with that face right-aligned; Latin-only text keeps Helvetica and is drawn exactly as before
     (and, because the font is subset, the Arabic face is not embedded in a Latin-only document).
 
-    The description and the numbers are drawn as two separate runs on purpose. Shaping a mixed
-    Arabic/ASCII string as one run would reverse the ASCII digits with it (HarfBuzz shapes one
-    direction per buffer), which is how Arabic PDFs end up with mirrored prices.
+    The description column and each numeric column are anchored independently on purpose. Shaping a
+    mixed Arabic/ASCII string as one run would reverse the ASCII digits with it (HarfBuzz shapes one
+    direction per buffer), which is how Arabic PDFs end up with mirrored prices — and drawing a long
+    numbers run from the same origin as an end-anchored description stacks them on top of each other.
+
+    ``tenant``/``rfq``/``supplier`` are optional so the many callers that only hold a PO row still get
+    a correct document; when they are absent the meta block is simply shorter, never invented.
     """
+    from reportlab.lib.colors import HexColor
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
 
+    from app.services.numbers import parse_decimal, plain
     from app.services.pdf_fonts import layout, paragraph_is_rtl, shaped
+
+    NAVY, GOLD, GRAY, LINE = HexColor("#16283f"), HexColor("#a8841a"), HexColor("#7a8494"), HexColor("#d9dce2")
+
+    def num(value, decimals: int = 2) -> str:
+        parsed = parse_decimal(value)
+        return f"{parsed:,.{decimals}f}" if parsed is not None else str(value)
+
+    issued = getattr(po, "issued_at", None)
+    issued_text = issued.strftime("%Y-%m-%d") if issued else ""
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    left, right = 20 * mm, width - 20 * mm
-    description_width = 95 * mm
+    left, right = 18 * mm, width - 18 * mm
+    usable = right - left
 
-    def fits(text: str, size: float, max_width: float) -> bool:
-        return sum(width for _, _, width in layout(text, size)) <= max_width
+    desc_end = left + usable * 0.50
+    qty_end = left + usable * 0.63
+    unit_end = left + usable * 0.80
+    total_end = right
+    description_width = desc_end - left - 4 * mm
 
-    def fit(text: str, size: float, max_width: float) -> str:
+    def runs_width(text: str, size: float, *, bold: bool = False) -> float:
+        return sum(w for _, _, w in layout(text, size, bold=bold))
+
+    def fit(text: str, size: float, max_width: float, *, bold: bool = False) -> str:
         """Trim a line to its column, measuring the shaped runs (Arabic widths differ from raw ones)."""
-        if fits(text, size, max_width):
+        if runs_width(text, size, bold=bold) <= max_width:
             return text
-        while text and not fits(f"{text}...", size, max_width):
+        while text and runs_width(f"{text}...", size, bold=bold) > max_width:
             text = text[:-1]
         return f"{text}..."
 
-    def draw_right(text: str, y: float, size: float, *, bold: bool = False) -> None:
-        """Draw one column: Arabic runs with the bundled face, everything else with Helvetica.
+    def draw_mixed(text: str, y: float, size: float, *, bold: bool = False, color=NAVY,
+                   anchor: str = "auto", end: float | None = None,
+                   max_width: float | None = None) -> None:
+        """Draw one mixed-script line.
 
-        The runs arrive in visual order, so drawing them left to right lays out both a right-to-left
-        Arabic line and a left-to-right Latin one correctly.
+        ``anchor='auto'`` follows the paragraph direction; ``anchor='right'`` pins the line to the
+        right margin; ``end=<x>`` pins the line to end exactly at x (table columns, header items).
+        ``max_width`` trims the line before drawing; defaults to the usable width.
         """
+        limit = max_width if max_width is not None else (end - left if end is not None else usable)
+        text = fit(text, size, limit, bold=bold)
         runs = layout(text, size, bold=bold)
-        x = right - sum(width for _, _, width in runs) if paragraph_is_rtl(text) else left
+        total = sum(w for _, _, w in runs)
+        if end is not None:
+            x = end - total
+        elif anchor == "right":
+            x = right - total
+        elif anchor == "left":
+            x = left
+        else:
+            x = right - total if paragraph_is_rtl(text) else left
+        pdf.setFillColor(color)
         for run, font, width in runs:
             pdf.setFont(font, size)
             pdf.drawString(x, y, shaped(run, font, size))
             x += width
 
-    def draw_left(text: str, y: float, size: float, *, bold: bool = False) -> None:
-        pdf.setFont("Helvetica-Bold" if bold else "Helvetica", size)
-        pdf.drawString(left, y, text)
+    def hr(y: float, *, color=LINE, width_pt: float = 0.5) -> None:
+        pdf.setStrokeColor(color)
+        pdf.setLineWidth(width_pt)
+        pdf.line(left, y, right, y)
 
+    def table_header(y: float) -> float:
+        draw_mixed("Description · البيان", y, 7.5, bold=True, color=GRAY, end=desc_end)
+        draw_mixed("Qty · الكمية", y, 7.5, bold=True, color=GRAY, end=qty_end)
+        draw_mixed("Price · السعر", y, 7.5, bold=True, color=GRAY, end=unit_end)
+        draw_mixed("Total · الإجمالي", y, 7.5, bold=True, color=GRAY, end=total_end)
+        hr(y - 2 * mm)
+        return y - 6 * mm
+
+    # ---------------------------------------------------------------- header
     pdf.setTitle(f"Purchase Order {po.code}")
-    draw_left(f"Purchase Order {po.code}", height - 25 * mm, 14, bold=True)
-    draw_left("MANTIQ - ProcureMent Intelligence", height - 32 * mm, 9)
-    draw_right("أمر شراء", height - 44 * mm, 12, bold=True)
-    y = height - 57 * mm
-    draw_right("البيان", y, 9, bold=True)
-    draw_left("Qty  |  Unit price  |  Line total", y, 9, bold=True)
-    y -= 6 * mm
+    pdf.setAuthor("ProcureAI")
+    pdf.setSubject("Purchase order")
+    draw_mixed("MANTIQ — PROCUREMENT INTELLIGENCE", height - 19 * mm, 10.5, bold=True)
+    draw_mixed("أمر شراء", height - 20 * mm, 17, bold=True, color=GOLD, anchor="right")
+    hr(height - 24 * mm, color=GOLD, width_pt=1.1)
+    draw_mixed("PURCHASE ORDER", height - 32 * mm, 8, color=GRAY)
+    draw_mixed(po.code, height - 42 * mm, 19, bold=True)
+    if issued_text:
+        draw_mixed(f"Issued · تاريخ الإصدار: {issued_text}", height - 31.5 * mm, 8.5,
+                   color=GRAY, anchor="right")
+
+    # ---------------------------------------------------------------- meta block (only what is true)
+    meta_y = height - 52 * mm
+    if tenant is not None and getattr(tenant, "name", None):
+        draw_mixed(f"Tenant · المنشأة: {tenant.name}", meta_y, 8.5)
+        meta_y -= 4.6 * mm
+    if supplier is not None and getattr(supplier, "name", None):
+        line = f"Supplier · المورد: {supplier.name}"
+        if getattr(supplier, "name_ar", None):
+            line += f" — {supplier.name_ar}"
+        city = getattr(supplier, "city", None)
+        country = getattr(supplier, "country", None)
+        if city or country:
+            line += f" · {', '.join(part for part in (city, country) if part)}"
+        draw_mixed(line, meta_y, 8.5)
+        meta_y -= 4.6 * mm
+    rfq_bits = []
+    if rfq is not None and getattr(rfq, "code", None):
+        rfq_bits.append(f"RFQ · طلب عرض: {rfq.code}")
+    incoterm = getattr(rfq, "incoterm", None) if rfq is not None else None
+    delivery = getattr(rfq, "delivery_location", None) if rfq is not None else None
+    payment = getattr(rfq, "payment_terms", None) if rfq is not None else None
+    if incoterm or delivery:
+        rfq_bits.append(f"Delivery · التسليم: {' — '.join(p for p in (incoterm, delivery or 'Buyer premises') if p)}")
+    if payment:
+        rfq_bits.append(f"Payment · الدفع: {payment}")
+    if rfq_bits:
+        draw_mixed("  ·  ".join(rfq_bits), meta_y, 8.5)
+        meta_y -= 4.6 * mm
+    meta_y -= 1.5 * mm
+    hr(meta_y)
+
+    # ---------------------------------------------------------------- lines table
+    y = table_header(meta_y - 6 * mm)
     for line in po.lines:
-        draw_right(fit(str(line["description"]), 9, description_width), y, 9)
-        draw_left(f"{line['quantity']} {line['uom']}  |  {line['unit_price']} {po.currency}  |  "
-                  f"{line['line_total']}", y, 9)
-        y -= 6 * mm
-        if y < 30 * mm:
+        quantity = parse_decimal(line.get("quantity"))
+        qty_text = f"{plain(quantity)} {line.get('uom', '')}".strip() if quantity is not None else str(line.get("quantity"))
+        draw_mixed(fit(str(line.get("description", "")), 8.5, description_width), y, 8.5, end=desc_end)
+        draw_mixed(qty_text, y, 8.5, end=qty_end, max_width=qty_end - desc_end - 3 * mm)
+        draw_mixed(f"{num(line.get('unit_price'))} {po.currency}", y, 8.5, end=unit_end,
+                   max_width=unit_end - qty_end - 3 * mm)
+        draw_mixed(num(line.get("line_total")), y, 8.5, end=total_end,
+                   max_width=total_end - unit_end - 3 * mm)
+        y -= 5.5 * mm
+        if y < 28 * mm:
             pdf.showPage()
-            y = height - 30 * mm
-    draw_left(f"Total: {po.amount} {po.currency}", y - 8 * mm, 11, bold=True)
-    draw_left("Generated by ProcureAI after human approval. Not a payment instruction.", 18 * mm, 7)
+            y = table_header(height - 20 * mm)
+    hr(y - 1 * mm)
+
+    # ---------------------------------------------------------------- totals
+    total_text = f"Total · الإجمالي   {num(po.amount)} {po.currency}"
+    draw_mixed(total_text, y - 8 * mm, 12.5, bold=True, color=NAVY, anchor="right")
+    draw_mixed("Included taxes are stated on the supplier invoice, not on this order.",
+               y - 13 * mm, 6.5, color=GRAY, anchor="right")
+
+    # ---------------------------------------------------------------- footer
+    hr(16 * mm)
+    draw_mixed("Generated by ProcureAI after human approval. Not a payment instruction.",
+               11 * mm, 6.5, color=GRAY)
+    draw_mixed("ليست تعليمات دفع", 11 * mm, 6.5, color=GRAY, anchor="right")
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()

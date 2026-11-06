@@ -37,6 +37,8 @@ dist/
 coverage/
 .vite/
 *.tsbuildinfo
+test-results/
+playwright-report/
 
 # ---------------------------------------------------------------- os noise
 .DS_Store

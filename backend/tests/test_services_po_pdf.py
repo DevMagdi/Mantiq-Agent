@@ -104,7 +104,11 @@ def test_a_po_with_arabic_lines_embeds_the_font_and_draws_shaped_text():
 def test_a_latin_line_keeps_helvetica_and_is_drawn_verbatim():
     content = _content(po_pdf("<html></html>", _po(LATIN_LINE)))
     assert "(Cement bags 50 kg) Tj" in content, "Latin text must not be re-encoded through the Arabic font"
-    assert "(120 bag  |  150.00 EGP  |  18,000.00) Tj" in content
+    # The table is drawn in anchored columns (description / qty / unit price / total), so each cell is
+    # its own Helvetica run — never merged into one overflowing string.
+    assert "(120 bag) Tj" in content
+    assert "(150.00 EGP) Tj" in content
+    assert "(18,000.00) Tj" in content
 
 
 # ------------------------------------------------------------------ ordering
