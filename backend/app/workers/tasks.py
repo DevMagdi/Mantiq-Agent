@@ -72,7 +72,7 @@ def retention_purge() -> dict[str, Any]:
     """Apply retention windows and execute due erasure requests."""
 
     async def _inner() -> dict[str, Any]:
-        from app.services.billing_helpers import purge_expired
+        from app.services.privacy import purge_expired
 
         totals = {"notifications_purged": 0, "erasure_records": 0}
         async with SessionLocal() as session:

@@ -145,6 +145,21 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     otel_enabled: bool = False
 
+    # --- embeddings (optional). Off means lexical / trigram search, never a fake vector. ---
+    embedding_provider: str = "off"  # off | openai_compatible
+    embedding_model: str = "text-embedding-3-small"
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_dimensions: int = 1536
+
+    # --- enterprise SSO (OIDC). Off until an identity provider is configured. ---
+    # A successful login never creates a user: the address must already exist in the tenant.
+    sso_enabled: bool = False
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = ""
+
     @property
     def is_prod(self) -> bool:
         return self.app_env.lower() in {"prod", "production"}

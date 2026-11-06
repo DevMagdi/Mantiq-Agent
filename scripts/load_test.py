@@ -7,6 +7,11 @@ hold a WebSocket open for the whole run, exactly like the browser app does.
 
     python scripts/load_test.py --users 50 --duration 60 --base-url http://localhost:8000
 
+Several API replicas share one database. Pass them as a comma-separated list and each virtual
+user sticks to one replica (round-robin by index), including that replica's WebSocket:
+
+    python scripts/load_test.py --base-urls http://localhost:8000,http://localhost:8001
+
 What it measures (all printed at the end, plus a JSON summary with --json out.json):
 
 * login + API latency percentiles (p50/p95/p99/max) overall and per endpoint,
@@ -473,6 +478,26 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+def replica_urls(base_url: str, base_urls: str | None) -> list[str]:
+    """One URL, or the comma-separated list. Empty pieces are dropped, trailing slashes too."""
+    parts = [part.strip().rstrip("/") for part in (base_urls or "").split(",") if part.strip()]
+    return parts or [base_url.rstrip("/")]
+
+
+def replica_for(index: int, urls: list[str]) -> str:
+    if not urls:
+        raise ValueError("at least one base url is required")
+    return urls[index % len(urls)]
+
+
+def ws_base_for(http_base: str) -> str:
+    if http_base.startswith("https://"):
+        return "wss://" + http_base[len("https://"):]
+    if http_base.startswith("http://"):
+        return "ws://" + http_base[len("http://"):]
+    return http_base
+
+
 async def provision_users(base_url: str, count: int) -> list[tuple[str, dict]]:
     """One account per virtual user, so 50 users do not share 8 identities.
 
@@ -522,8 +547,10 @@ async def provision_users(base_url: str, count: int) -> list[tuple[str, dict]]:
 
 async def run(args: argparse.Namespace) -> int:
     random.seed(args.seed)
+    urls = replica_urls(args.base_url, args.base_urls)
+    primary = urls[0]
     if args.provision:
-        assignments = await provision_users(args.base_url, args.users)
+        assignments = await provision_users(primary, args.users)
         print(f"provisioned {len(assignments)} load-test accounts (one per virtual user)")
     else:
         emails = list(PERSONAS)
@@ -535,24 +562,19 @@ async def run(args: argparse.Namespace) -> int:
     started = time.time()
 
     print(
-        f"load test: {args.users} users / {args.duration}s against {args.base_url} "
+        f"load test: {args.users} users / {args.duration}s against {', '.join(urls)} "
         f"(seed {args.seed})"
     )
-    tasks = [
-        asyncio.create_task(
-            virtual_user(
-                index,
-                email,
-                persona,
-                args.base_url,
-                args.ws_base or args.base_url.replace("http", "ws", 1),
-                stop_at,
-                stats,
-                receipt_orders,
-            )
-        )
-        for index, (email, persona) in enumerate(assignments)
-    ]
+    tasks = []
+    for index, (email, persona) in enumerate(assignments):
+        base = replica_for(index, urls)
+        if len(urls) == 1 and args.ws_base:
+            socket_base = args.ws_base
+        else:
+            socket_base = ws_base_for(base)
+        tasks.append(asyncio.create_task(
+            virtual_user(index, email, persona, base, socket_base, stop_at, stats, receipt_orders)
+        ))
     progress = asyncio.create_task(_report_progress(stats, started + args.duration))
     await asyncio.gather(*tasks)
     progress.cancel()
@@ -582,7 +604,7 @@ async def run(args: argparse.Namespace) -> int:
     }
 
     summary = {
-        "target": args.base_url,
+        "target": urls[0] if len(urls) == 1 else urls,
         "users": args.users,
         "duration_s": round(elapsed, 1),
         "requests": total,
@@ -665,7 +687,11 @@ async def _report_progress(stats: Stats, until: float) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="50-user load test for ProcureAI")
     parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--ws-base", default=None, help="defaults to base-url with ws:// scheme")
+    parser.add_argument("--base-urls", default="",
+                        help="comma-separated API replicas; virtual users are pinned round-robin. "
+                             "Overrides --base-url when set.")
+    parser.add_argument("--ws-base", default=None,
+                        help="WebSocket origin for a single replica; ignored when --base-urls lists several")
     parser.add_argument("--users", type=int, default=50)
     parser.add_argument("--duration", type=int, default=60, help="measured window in seconds")
     parser.add_argument("--seed", type=int, default=7)

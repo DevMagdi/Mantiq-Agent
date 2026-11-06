@@ -140,7 +140,7 @@ def purge():
     """Run retention purges and pending erasure requests for every tenant."""
 
     async def _inner():
-        from app.services.billing_helpers import purge_expired
+        from app.services.privacy import purge_expired
 
         results = {}
         async with SessionLocal() as session:
@@ -317,8 +317,10 @@ def doctor():
                     "mode": "s3" if settings.aws_storage_bucket else "local",
                     "endpoint": settings.aws_endpoint or ("aws-default" if settings.aws_storage_bucket else "")},
         "accounting_enabled": settings.accounting_enabled,
-        "sso": {"enabled": bool(getattr(settings, "sso_enabled", False)),
-                "issuer": getattr(settings, "oidc_issuer_url", "") or None},
+        "sso": {"enabled": settings.sso_enabled,
+                "issuer": settings.oidc_issuer_url or None,
+                "client_configured": bool(settings.oidc_client_id and settings.oidc_client_secret)},
+        "embedding_provider": settings.embedding_provider,
         "bootstrap_on_start": settings.bootstrap_on_start,
         "public_url": settings.public_app_url,
         "note": ("Every adapter is real." if not fakes else

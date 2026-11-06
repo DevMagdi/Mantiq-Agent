@@ -22,7 +22,7 @@ from app.db.models.entities import (
     UsageEvent,
 )
 from app.db.session import SessionLocal
-from app.services import billing_helpers, comparison, discovery
+from app.services import billing_helpers, comparison, discovery, privacy
 
 
 async def _tenant(session) -> Tenant:
@@ -188,7 +188,7 @@ async def test_retention_purge_reports_what_it_deleted_and_honours_erasure():
                                      due_at=datetime.now(UTC) + timedelta(days=30))
         session.add(request)
         await session.flush()
-        summary = await billing_helpers.purge_expired(session, tenant)
+        summary = await privacy.purge_expired(session, tenant)
         assert set(summary) >= {"logs_eligible", "notifications_purged", "erasure_records"}
         assert summary["erasure_records"] >= 0
         assert request.status == "completed"

@@ -99,13 +99,13 @@ CDN-less (`npm run e2e:local`): **28/28 specs pass**.
 
 | Item | What is missing | Consequence |
 | --- | --- | --- |
-| pgvector similarity ranking | The `embedding_vec vector(1536)` columns and HNSW indexes are created by migration `0011` (verified on real PostgreSQL 16), but no service computes embeddings yet | Ranking falls back to the trigram/keyword path; the columns are ready for an embedding provider |
+| pgvector similarity ranking | `EMBEDDING_PROVIDER=openai_compatible` computes vectors over `/v1/embeddings` and writes `embedding_vec` when the length is 1536. Otherwise cosine runs on the JSON column. `off` (default) does not call out and does not invent a vector | `app/services/embeddings.py`, `tests/test_embeddings.py`. A live key is still required for a real model |
 | Real adapters | SMTP, Meta WhatsApp Cloud API, SerpAPI/Brave, Odoo, Stripe, tesseract/Whisper | Interfaces and clients are implemented and unit-tested against local servers; no live vendor account was available in this sandbox, so no call reached the vendor's own service |
 | Live vendor credentials | A Twilio account SID/token with a WhatsApp sender, and an Anthropic/OpenAI key | Everything except the vendor's own endpoint is proven locally; a live smoke test needs the credentials and outbound egress listed in `docs/ENVIRONMENT.md` |
 | Twilio at scale | WhatsApp template approval, media hosting for documents | Documents require a public `MediaUrl` (the adapter refuses rather than dropping them); templates need Meta approval of the Content template |
 | Object storage | S3/MinIO upload path | `LocalStorage` is the working default; the S3 client is behind credentials |
-| Browser E2E | A Playwright suite (`frontend/e2e`) covering sign-in/out, RTL/English, every route and the WebSocket handshake exists and typechecks, but **no browser binary can be downloaded in this sandbox** (the CDN is blocked), so it has not been executed | The same journeys are proven without a browser by `scripts/e2e_journeys.py` (HTTP + WebSocket, two replicas); a machine with network access runs `npx playwright install chromium && npm run e2e` |
-| WebSocket back-pressure | A slow client is dropped after its first failed send; there is no per-socket queue | Load shedding is deliberate (a stuck browser must not stall a replica), but a burst to a slow client loses intermediate frames |
+| Browser E2E | 28 Playwright specs pass (CI job `e2e`, and `npm run e2e:local` when the Playwright CDN is blocked) | `frontend/e2e`, `docs/E2E.md` |
+| WebSocket back-pressure | Bounded queue of 64 frames; a slow socket is dropped with `1013` and counted on `/metrics` | `tests/test_ws_hub.py` |
 | Real payment execution | Bank/PSP integration | Deliberately absent: the product records payments made outside it. `payment_suggestion.execution` is literally `outside_platform`, and there is no adapter seam to enable by accident |
 | WhatsApp production transport | A real Meta Cloud API / BSP account (phone number id, permanent token, approved template names) | `WhatsAppProvider` is implemented against the documented Cloud API shapes; CI runs the deterministic fake, so retries, receipts and rich messages are proven but not against Meta's live service |
 | Voice media (STT/TTS duplex) | A telephony provider with media streams | The AI agent plays a scripted transcript through the `TelephonyProvider` seam and stores every turn; there is no live audio bridge, so "the AI speaks" is a scripted, audited turn, not a live synthesis |
@@ -114,9 +114,11 @@ CDN-less (`npm run e2e:local`): **28/28 specs pass**.
 
 ## Not implemented (deliberate, documented, no fake screens)
 
+OIDC sign-in is implemented (`app/services/oidc.py`) and stays off until `SSO_ENABLED` plus a real issuer. SAML is not implemented.
+
 | Item | Why it is absent | Where the extension point is |
 | --- | --- | --- |
-| SSO (SAML/OIDC) | No identity provider in scope; a fake login would be dishonest | `GET /auth/sso/config` reports provider availability from env; `app/services/auth.py` is the seam |
+| SAML 2.0 | No SAML identity provider in scope; OIDC covers the enterprise login | `app/services/oidc.py` is the OIDC path; a SAML assertion consumer would sit next to it |
 | Fully automated key rotation CLI | Needs a running secret manager | `app/core/crypto.py` records `key_id` so DEKs can be re-wrapped; procedure in `docs/SECURITY.md` |
 | Mobile app | Not in scope | The API is versioned and CORS-configured for a future client |
 | e-Invoicing / VAT submission | Country-specific compliance not in the SRS extract | Invoice model carries `lines`, `currency`, `status`; a submission adapter would slot in next to the payment adapter |
@@ -133,45 +135,13 @@ the Celery workers are not executed here; their code paths run eagerly in the te
 
 ## Known rough edges
 
-1. `app/services/billing_helpers.py` still contains an older privacy implementation
-   (`export_subject_data`, `execute_erasure`) kept for the CLI `purge` path; the API uses the newer
-   `app/services/privacy.py`. Both are tested; consolidating them is a clean-up task, not a
-   behaviour gap.
-2. `app/agents/llm/providers.py` is now exercised over a real socket (success, retry, 4xx, transport
-   failure) but still not against a vendor's live endpoint; a live smoke test needs `LLM_API_KEY`.
-3. The WebSocket hub now applies back-pressure: every socket drains a bounded per-connection queue
-   (64 frames) in its own writer task, and a socket that falls behind is disconnected with code 1013
-   so the browser reconnects and refetches — instead of stalling the room or pinning unbounded
-   memory. Drops are counted on `hub.slow_disconnects` and exposed on `/metrics` as
-   `procureai_ws_slow_disconnects_total`. Proven in `tests/test_ws_hub.py`.
-4. Arabic PDF rendering of purchase orders embeds Noto Naskh Arabic and shapes it through HarfBuzz,
-   with the runs of a mixed line ordered right-to-left (`app/services/pdf_fonts.py`). The layout was
-   rebuilt this phase (per-column run anchoring, a real meta block, thousands-separated amounts) after
-   a rasterised render showed the columns overlapping — and the page is now verified as an image:
-   PyMuPDF decompresses and rasterises the phase-6 PO (`/api/v1/purchase-orders/{id}/pdf`), the Arabic
-   lines read RTL, the Latin/numeric columns do not overlap, and the totals line is correct. The
-   manual cross-check in `docs/RUNBOOK.md` still applies before a pilot mails one.
-5. Frontend bundle: 400 kB (108 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
-   chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
-   the post-award screens ship in the main chunk.
-6. `channels.resolve` reads supplier consent one channel at a time; a bulk RFQ dispatch reuses the
-   memoised snapshot, so a supplier who opts out *while* a batch is running is honoured on the next
-   batch, not mid-batch.
-7. The assistant and the AI voice agent are deliberately deterministic (see above): adding an LLM
-   later must not move the policy check out of code, which is why `voice_agent` returns
-   `knowledge_version` and per-turn `block_code` — a regression there is visible in the data.
-8. The load test measures one uvicorn worker against one PostgreSQL instance. Cross-replica behaviour
-   is proven separately (`scripts/e2e_journeys.py` runs two API processes over one Redis). The rate
-   limiter now has a shared backend: `RATE_LIMIT_BACKEND=redis` counts one sliding window across all
-   replicas (sorted set + atomic pipeline, rejected calls do not extend the window), proven by
-   `tests/test_rate_limit_redis.py` against an in-process Redis wire server and verified live on a
-   real Redis. If Redis is unreachable it falls back to per-process memory with a logged warning and
-   `procureai doctor` says so — availability first, loudly, never silently. No multi-replica *load*
-   run has been executed yet; that remains open.
-9. Concurrent goods receipts against **one** purchase order serialise on that order's row lock by
-   design (that is what makes the cumulative over-receipt check safe). Eleven simultaneous receipts
-   on the same order reach p95 ≈ 1.3 s while the aggregate p95 stays at 188 ms; a real warehouse
-   receives against different orders. Documented rather than "fixed" — removing the lock reopens the
-   race that booked 400 of 100 units (`docs/LOAD_TEST.md`).
-10. Load-test numbers move ±40 % between runs on this shared sandbox (p95 115–260 ms for the same
-   build). The error count and the invariants are the hard signals, not the percentile.
+1. Privacy export and erasure have one implementation, `app/services/privacy.py`. The CLI (`procureai purge`) and the retention worker both call `privacy.purge_expired`, which redacts through `execute_erasure`. The older copy in `billing_helpers.py` is gone.
+2. `app/agents/llm/providers.py` is exercised over a real socket but not against a vendor's live endpoint; `procureai live-smoke` is the gate and needs `LLM_API_KEY`.
+3. The WebSocket hub applies back-pressure: every socket drains a bounded per-connection queue (64 frames) and a socket that falls behind is disconnected with code 1013. Drops are counted as `procureai_ws_slow_disconnects_total`.
+4. Arabic PO PDFs embed Noto Naskh Arabic, shape through HarfBuzz, and were rasterised (PyMuPDF) after the column layout was rebuilt. The manual cross-check in `docs/RUNBOOK.md` still applies before a pilot mails one.
+5. Analytics, the purchase-order screens and the accounting screens are lazy routes, so they are not in the first chunk. The charts vendor chunk is still loaded with the analytics page.
+6. `channels.resolve` reads supplier consent one channel at a time; a bulk RFQ dispatch reuses the memoised snapshot, so a supplier who opts out *while* a batch is running is honoured on the next batch, not mid-batch.
+7. The assistant and the AI voice agent are deliberately deterministic. Adding an LLM later must not move the policy check out of code.
+8. `scripts/load_test.py --base-urls` pins each virtual user to one replica (round-robin, with that replica's WebSocket). A 50-user × N-replica timing run has not been executed in this environment; the assignment itself is tested.
+9. Concurrent goods receipts against one purchase order serialise on that order's row lock by design. Documented in `docs/LOAD_TEST.md`.
+10. Load-test numbers move between runs on a shared machine. The error count and the invariants are the hard signals, not the percentile.

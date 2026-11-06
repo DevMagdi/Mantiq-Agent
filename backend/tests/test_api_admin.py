@@ -76,7 +76,9 @@ async def test_password_reset_request_never_leaks_whether_account_exists(client)
 async def test_sso_config_is_public_and_reports_disabled(client):
     resp = await client.get("/api/v1/auth/sso/config", params={"tenant_slug": "nile"})
     assert resp.status_code == 200
-    assert "providers" in resp.json()
+    body = resp.json()
+    assert body["enabled"] is False
+    assert body["providers"] == []
 
 
 async def test_mfa_setup_enable_disable_cycle(client, buyer):
