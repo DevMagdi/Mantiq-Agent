@@ -93,10 +93,12 @@ CI, so the specs cannot rot silently even where browsers are unavailable.
 
 The `e2e` job (`.github/workflows/ci.yml`) migrates a real PostgreSQL 16 from scratch, bootstraps and
 seeds the demo tenant, serves the API against a real Redis (`RATE_LIMIT_BACKEND=redis`,
-`WS_FANOUT_ENABLED=true`), installs Chromium from the Playwright CDN and runs this suite on every
-push. The specs mutate the shared demo tenant, so they run on a fresh database per run and one
-worker at a time. Where browsers cannot be installed at all (this sandbox), `npm run e2e:local`
-provides the same coverage CDN-less, and `npm run e2e:typecheck` keeps the specs honest.
+`WS_FANOUT_ENABLED=true`) and runs this suite on every push through the same CDN-less Chromium path
+(`npm run e2e:local`), so the CI job needs no browser CDN and no apt step. The specs mutate the
+shared demo tenant, so they run on a fresh database per run and one worker at a time. (An earlier
+revision of the job used `npx playwright install --with-deps chromium`; the library install step
+failed on the runner and the CDN-less path is what runs now — one browser source, everywhere.)
+`npm run e2e:typecheck` still keeps the specs honest where browsers cannot be installed at all.
 
 ## 3. Unit-level end-to-end
 

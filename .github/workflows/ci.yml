@@ -226,15 +226,16 @@ jobs:
           done
           echo "the API never became healthy"; exit 1
 
-      - name: Install the frontend and the browser
+      - name: Install the frontend
         working-directory: frontend
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npm ci
 
-      - name: Run the browser suite
+      # The browser ships through the npm registry (@sparticuz/chromium), not cdn.playwright.dev:
+      # the suite is identical, the runner needs no browser CDN and no apt step. The same command
+      # (`npm run e2e:local`) is what developers on CDN-blocked networks use; see docs/E2E.md §2.
+      - name: Run the browser suite (CDN-less Chromium)
         working-directory: frontend
-        run: npm run e2e
+        run: npm run e2e:local
 
       - uses: actions/upload-artifact@v4
         if: failure()
