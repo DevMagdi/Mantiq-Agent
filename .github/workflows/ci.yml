@@ -237,6 +237,18 @@ jobs:
         working-directory: frontend
         run: npm run e2e:local
 
+      - name: Dump Playwright failure diagnostics into this log
+        if: failure()
+        working-directory: frontend
+        run: |
+          shopt -s nullglob
+          for dir in test-results/*/; do
+            echo "=================================================================="
+            echo "== $dir"
+            cat "$dir/error-context.md" 2>/dev/null | head -80
+            cat "$dir/test-failed-1.png" > /dev/null 2>&1 && echo "(screenshot: $dir/test-failed-1.png)"
+          done
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

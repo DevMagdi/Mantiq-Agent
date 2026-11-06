@@ -41,6 +41,8 @@ const lambda = process.env.SPARTICUZ_LAMBDA === "1";
 const cleanArgs = sparticuz.args
   .map((arg) => arg.replace(/'/g, ""))
   .filter((arg) => lambda || (arg !== "--single-process" && arg !== "--no-zygote"));
+// CI runners ship a small /dev/shm: Chromium crashes without this, and nothing anywhere needs shm.
+if (!cleanArgs.includes("--disable-dev-shm-usage")) cleanArgs.push("--disable-dev-shm-usage");
 
 const env = { ...process.env };
 const ldPath = join(al2023, "lib");
