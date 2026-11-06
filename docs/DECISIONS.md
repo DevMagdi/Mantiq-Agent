@@ -512,22 +512,22 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     (`tenant` | `legacy` | `platform`) and `platform_provider`, which is how the UI can say "your key
     is in charge" instead of guessing. Disabling a row removes it from that precedence chain, which is
     exactly how "disable restores the safe mode" is implemented rather than special-cased.
-116. **Partial credentials are an error state, not a sandbox state.** `snapshot()` recomputes `missing`
+131. **Partial credentials are an error state, not a sandbox state.** `snapshot()` recomputes `missing`
     from the catalogue on every read and reports `error` with the missing field names (and the
     vendor's `last_error` when a probe failed). The alternative — showing `Sandbox` for a save that
     cannot possibly work — is the failure mode this whole screen exists to remove.
-117. **Secrets are write-only.** The API returns `secrets_saved` (the names) and `masked` (`••••` +
+132. **Secrets are write-only.** The API returns `secrets_saved` (the names) and `masked` (`••••` +
     the last four characters) and never the value; saving again without touching a field keeps the
     stored secret instead of blanking it, and `secrets_changed` tells the UI whether to say
     "updated". Every save, enable, disable and delete writes an audit entry with the field names (not
     the values), so a credential rotation is attributable after the fact.
-118. **The vendor-side proof is a real socket, and it starts from the screen.** The integration tests
+133. **The vendor-side proof is a real socket, and it starts from the screen.** The integration tests
     and `scripts/e2e_journeys.py` start HTTP servers that speak the Twilio, Meta Cloud API, SerpAPI,
     Anthropic and OpenAI wire formats, and the e2e run keeps the *platform* on `fake` with no vendor
     secret in the environment. Any `live` status or vendor call in that run therefore has exactly one
     possible origin: the credentials PUT through `/integrations/{kind}`. A probe that only checks
     "the fields are non-empty" would have passed while the product was broken.
-119. **Accounting is a deployment switch, not a tenant flag.** The pilot must not show a trace of it,
+134. **Accounting is a deployment switch, not a tenant flag.** The pilot must not show a trace of it,
     so `ACCOUNTING_ENABLED` lives in `Settings` and is resolved when the router is assembled:
     `build_api_router(accounting_enabled=…)` simply does not include the accounting router, which is
     why the paths are absent from `/api/openapi.json` (verified in
@@ -536,7 +536,7 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     enable — it. The two supplier-ledger routes and the P2P lifecycle route moved out of `orders.py`
     into the accounting module for the same reason: leaving them behind would have kept four paths
     in the schema that only the accounting module can answer.
-120. **The hidden module loses its permissions, not its matrix.** `core.rbac.visible_permissions()`
+135. **The hidden module loses its permissions, not its matrix.** `core.rbac.visible_permissions()`
     removes `accounting:*`, `cost:*`, `ledger:read` and `audit_package:*` from the effective set at
     the one place `Context` is built, so `/auth/me`, the sidebar, every `require()` and every
     capability-driven card agree without a second source of truth. The RBAC matrix itself is
@@ -612,3 +612,49 @@ enterprise-grade direction, and recorded here. Format: **decision — why — co
     paragraph direction comes from the first strong character, neutral characters stay with the run
     they follow, and the runs are emitted in visual order. That avoided `python-bidi`/`arabic-reshaper`,
     which would have been two more dependencies to vet and would still have needed the same font.
+131. **The rate limiter grew a real second backend instead of a promise.** Decision 111 called the
+    in-process counter "honest, but the next change" — this is that change. `RATE_LIMIT_BACKEND=redis`
+    slides one sorted-set window per identity across every replica (`zadd`/`zremrangebyscore`/`zcard`
+    in one atomic pipeline; a rejected call removes the entry it recorded, so being over budget does
+    not extend the lockout). `RATE_LIMIT_BACKEND=memory` stays the default, exact for one replica.
+    When Redis is unreachable the limiter falls back to memory **and says so** — a `WARNING` naming
+    the failure, `/metrics` and `procureai doctor` reporting the fallback — because silently
+    fail-open is how a limiter becomes decoration, and fail-closed takes the whole API down with
+    Redis. Rejected calls are never double-counted in either backend. Proven per-backend in
+    `tests/test_rate_limit_redis.py` (shared window across simulated replicas, rejection accounting,
+    mid-call Redis failure) and live against a real Redis on this stack (`procureai:rl:*` keys with
+    the expected cardinalities after traffic). Not yet proven: a multi-replica *load* run — the
+    accounting is exact, the timing under 50 concurrent sessions across two replicas has not been
+    measured, and `docs/LOAD_TEST.md` still describes one replica.
+132. **The WebSocket hub sheds load instead of damming it.** Every socket now drains a bounded
+    per-connection queue (64 frames) in its own writer task. A socket that falls behind is disconnected
+    with code 1013 so the browser reconnects and refetches; the alternative — an unbounded queue per
+    slow reader — was a memory leak proportional to the room, and awaiting `send_text` inline was a
+    head-of-line block for every other subscriber. Drops are observable: `hub.slow_disconnects` and
+    the `procureai_ws_slow_disconnects_total` gauge on `/metrics`. A broadcast is O(healthy sockets),
+    never O(slowest socket).
+133. **Tracing is real, not reserved.** The `otel_enabled` setting was dead weight; it now drives
+    auto-instrumentation of FastAPI and SQLAlchemy with OTLP/HTTP export (`app/core/observability.py`,
+    service name `procureai-api`). Off by default — a pilot that has not deployed a collector pays
+    nothing — and when it is on, a collector that is down costs log lines, never boot: telemetry
+    degrades, the request path does not. Proven with an injected in-memory exporter
+    (`tests/test_observability.py`): a real request through the ASGI app emits a GET span under the
+    `procureai-api` resource. What this does not include: span sampling strategy, trace exemplars on
+    logs, or SQL query text scrubbing beyond what the instrumentor does by default.
+134. **The PO PDF lays out its own columns; the font does not do it alone.** The first PDF rasterised
+    in this phase (PyMuPDF, 150 dpi) showed Latin and numeric columns overlapping line descriptions —
+    shaped Arabic measure differently, and the numeric run was drawn from the same origin as the
+    end-anchored description. The renderer now anchors each column independently (description, qty,
+    unit price, total), trims cells to column width measured in *shaped* widths, draws a meta block
+    (tenant, supplier incl. Arabic name, RFQ/delivery/payment, issued date) that the HTML print view
+    already promised, and formats amounts with thousands separators. A shared-font bug fell out of
+    the same fix: `paragraph_is_rtl("")` passed an empty string into the Arabic range check and took
+    the whole render down — a digits-only line has no strong direction and is now correctly LTR
+    (`app/services/pdf_fonts.py`).
+135. **Anonymous boot sends zero doomed requests.** The SPA used to fire `/auth/me` twice (StrictMode)
+    and `/auth/refresh` once before login with no cookies — three guaranteed 401s per page load that
+    every smoke test (and every first-time visitor) had to swallow. `AuthProvider` now restores
+    silently only when a refresh cookie exists, concurrent boots dedupe through one in-flight restore,
+    and the console is pristine on the login path — which is what the browser suite asserts
+    (`trackConsoleErrors`), and why the whole 29→28-spec suite went green without touching a single
+    assertion's meaning.

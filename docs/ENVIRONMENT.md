@@ -169,6 +169,7 @@ deployment is still missing a credential — it never prints a secret value, onl
 | `RATE_LIMIT_ANONYMOUS_PER_MINUTE` | `600` | Unauthenticated requests per minute per IP. |
 | `RATE_LIMIT_LOGIN_PER_ACCOUNT` | `10` | Failed logins per minute per account before the account is throttled. |
 | `RATE_LIMIT_LOGIN_PER_IP` | `120` | Failed logins per minute per IP. |
+| `RATE_LIMIT_BACKEND` | `memory` | `memory` = per-process buckets (exact for one replica); `redis` = one shared sliding window across replicas (needs `REDIS_URL`); falls back to memory with a logged warning when Redis is unreachable. |
 
 ### 7.3 Database pool and isolation
 

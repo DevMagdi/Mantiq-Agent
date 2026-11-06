@@ -49,42 +49,42 @@ def test_identity_uses_the_signed_in_user_and_falls_back_to_the_ip():
     assert rate_limit.identity(_request("")) == "ip:10.20.30.40"
 
 
-def test_fifty_colleagues_behind_one_ip_have_independent_budgets():
+async def test_fifty_colleagues_behind_one_ip_have_independent_budgets():
     """15,000 authenticated requests from a single IP: impossible under an IP-only bucket."""
     tokens = [create_access_token(user_id=f"user-{index}", tenant_id="tenant-1", roles=["buyer"])
               for index in range(50)]
     for token in tokens:
         for _ in range(200):  # under the 240/min per-user limit
-            rate_limit.enforce(_request(token))
+            await rate_limit.enforce(_request(token))
     # ... and one of them going over their own budget is the only thing that trips it.
     with pytest.raises(RateLimited):
         for _ in range(100):
-            rate_limit.enforce(_request(tokens[0]))
+            await rate_limit.enforce(_request(tokens[0]))
 
 
-def test_anonymous_traffic_is_bucketed_by_ip_with_a_limit_that_fits_an_office():
+async def test_anonymous_traffic_is_bucketed_by_ip_with_a_limit_that_fits_an_office():
     for _ in range(settings.rate_limit_anonymous_per_minute):
-        rate_limit.enforce(_request(""))
+        await rate_limit.enforce(_request(""))
     with pytest.raises(RateLimited) as caught:
-        rate_limit.enforce(_request(""))
+        await rate_limit.enforce(_request(""))
     assert caught.value.extra["retry_after_seconds"] >= 1
     assert rate_limit.retry_after_seconds(caught.value) >= 1
     # Another address is unaffected.
-    rate_limit.enforce(_request("", host="10.20.30.41"))
+    await rate_limit.enforce(_request("", host="10.20.30.41"))
 
 
-def test_one_account_cannot_be_guessed_at_while_the_office_still_signs_in():
+async def test_one_account_cannot_be_guessed_at_while_the_office_still_signs_in():
     for account in range(40):
-        rate_limit.enforce_login("10.20.30.40", f"user{account}@nile.example.com")
+        await rate_limit.enforce_login("10.20.30.40", f"user{account}@nile.example.com")
     with pytest.raises(RateLimited):
         for _ in range(settings.rate_limit_login_per_account + 1):
-            rate_limit.enforce_login("10.20.30.40", "victim@nile.example.com")
+            await rate_limit.enforce_login("10.20.30.40", "victim@nile.example.com")
 
 
-def test_mass_attempts_from_one_host_are_still_capped():
+async def test_mass_attempts_from_one_host_are_still_capped():
     with pytest.raises(RateLimited):
         for index in range(settings.rate_limit_login_per_ip + 1):
-            rate_limit.enforce_login("10.20.30.40", f"noise{index}@nile.example.com")
+            await rate_limit.enforce_login("10.20.30.40", f"noise{index}@nile.example.com")
 
 
 async def test_thirty_sign_ins_from_one_ip_succeed_over_http(client):

@@ -68,7 +68,7 @@ class ResetConfirmIn(BaseModel):
 @router.post("/auth/login", summary="Email + password sign-in (TOTP challenge when enabled)")
 async def login(payload: LoginIn, request: Request, response: Response,
                 session: AsyncSession = Depends(get_session_dep)):
-    rate_login(request.client.host if request.client else "", payload.email)
+    await rate_login(request.client.host if request.client else "", payload.email)
     result = await auth_service.login(
         session, email=payload.email, password=payload.password, tenant_slug=payload.tenant_slug,
         user_agent=request.headers.get("user-agent", ""), ip=request.client.host if request.client else "",
@@ -82,7 +82,7 @@ async def login(payload: LoginIn, request: Request, response: Response,
 @router.post("/auth/mfa/verify", summary="Complete sign-in with a TOTP or backup code")
 async def mfa_verify(payload: MfaVerifyIn, request: Request, response: Response,
                      session: AsyncSession = Depends(get_session_dep)):
-    rate_check(f"mfa:{request.client.host if request.client else 'unknown'}", 15)
+    await rate_check(f"mfa:{request.client.host if request.client else 'unknown'}", 15)
     result = await auth_service.verify_mfa(
         session, challenge_token=payload.challenge_token, code=payload.code,
         user_agent=request.headers.get("user-agent", ""), ip=request.client.host if request.client else "",
@@ -199,7 +199,7 @@ async def revoke_session(session_id: str, ctx: Context = Depends(current_context
 
 @router.post("/auth/password-reset/request", summary="Request a password reset link (no enumeration)")
 async def reset_request(payload: ResetRequestIn, request: Request, session: AsyncSession = Depends(get_session_dep)):
-    rate_check(f"reset:{request.client.host if request.client else 'unknown'}", 5)
+    await rate_check(f"reset:{request.client.host if request.client else 'unknown'}", 5)
     await auth_service.request_password_reset(session, payload.email,
                                               ip=request.client.host if request.client else "")
     await session.commit()

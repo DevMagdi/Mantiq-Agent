@@ -1,25 +1,28 @@
 # Build progress — honest status
 
-Updated: 2026-10-31 (phase 5 — real providers, cross-replica live events, browser-test suite). This
-file exists so nobody has to guess what works. Each row says what is implemented, what is proven by a
-test, and what genuinely does not exist yet.
+Updated: 2026-11-06 (phase 6 — production hardening: vendor gate, browser suite green, shared rate
+limiter, WebSocket back-pressure, OTel). This file exists so nobody has to guess what works. Each row
+says what is implemented, what is proven by a test, and what genuinely does not exist yet.
 
 Verification commands behind this snapshot. Everything below was executed for this phase; real output
 is pasted in `docs/PR_PHASE5.md`.
 
 ```bash
-cd backend && pytest tests                              # 746 tests, 0 failures, 88 % line coverage
+cd backend && pytest tests                              # 813 tests, 0 failures
 cd backend && ruff check app tests                      # clean
 python scripts/e2e_journeys.py                          # 15 journeys PASS (two replicas + real Redis +
                                                         # Twilio-shaped + Anthropic-shaped servers)
-cd frontend && npm run typecheck && npm run lint && npm run test && npm run build   # 84 tests, build ok
-cd frontend && npm run e2e:typecheck                     # Playwright suite compiles (strict)
+cd frontend && npm run typecheck && npm run lint && npm run test && npm run build   # 89 tests, build ok
+cd frontend && npm run e2e                              # 28 browser specs PASS (Chromium)
+cd frontend && npm run e2e:local                        # same 28 specs CDN-less (this sandbox)
 ```
 
-The PostgreSQL-only proofs (RLS isolation, concurrency invariants, the 50-user load run) were measured
-in phase 4 on a real PostgreSQL 16.2 and **were not re-measured in this phase**: the sandbox reset
-removed the local server, and no PostgreSQL binary is installable here. They run on every push in the
-CI job `postgres`; the numbers below are labelled with the phase they were measured in.
+The PostgreSQL-only proofs (RLS isolation, concurrency invariants, the migration chain) run on every
+push in the CI job `postgres` (real PostgreSQL 16), as do the concurrency invariants against the live
+API; the 50-user load run was measured in phase 4 and has not been re-measured since — the numbers
+below are labelled with the phase they were measured in. This phase adds CI job `e2e`: migrate →
+bootstrap → seed → serve against real PostgreSQL + Redis → Chromium suite. Locally it was executed
+CDN-less (`npm run e2e:local`): **28/28 specs pass**.
 
 ## Implemented and tested
 
@@ -46,6 +49,7 @@ CI job `postgres`; the numbers below are labelled with the phase they were measu
 | Agents | orchestration graph with human interrupts, 12 audited tools, forbidden verbs refused | `tests/test_agents_graph.py` |
 | Security | Argon2id, TOTP MFA, rotating refresh sessions, lockout, RBAC matrix, PII decryption fails closed on a master-key mismatch | `tests/test_services_approval_auth.py`, `tests/test_api_identity.py`, `tests/test_crypto_resilience.py` |
 | Privacy | export bundle, erasure request workflow, redaction that keeps commercial records | `tests/test_services_privacy_portal.py` |
+| Distributed tracing | Off by default; `OTEL_ENABLED=true` auto-instrumentates FastAPI + SQLAlchemy and exports OTLP/HTTP spans (`OTEL_EXPORTER_OTLP_ENDPOINT`), service `procureai-api`; never breaks boot when the collector is down | `app/core/observability.py`, `tests/test_observability.py` |
 | Billing | usage metering, invoice generation, usage export | `tests/test_services_award_discovery.py` |
 | Admin | users, roles, limits, plants, taxonomy, templates, integrations, API keys, retention, audit | `tests/test_api_admin.py` (26) |
 | Integrations (tenant-managed) | **Settings → Integrations** configures `llm` (Anthropic / OpenAI-compatible), `whatsapp` (Meta Cloud API / Twilio), `sms`, `telephony` (Twilio), `email` (real SMTP) and `search` (SerpAPI / Brave) per tenant: per-provider fields, write-only secrets encrypted at rest and masked as `••••last4`, a computed status (`live` / `sandbox` / `not_configured` / `error` / `disabled`), one real vendor call per **Test connection**, `Enable`/`Disable`, and an audit row per change. A complete *and* enabled row outranks the environment for that tenant; disabling hands traffic back to the platform adapter | `tests/test_api_integrations.py` (15, vendor-shaped Twilio/Meta/SerpAPI/SMTP servers), `frontend/src/components/integrations.test.tsx` (8), `scripts/e2e_journeys.py` journeys `integrations` + `integration safety` |
@@ -54,7 +58,7 @@ CI job `postgres`; the numbers below are labelled with the phase they were measu
 | Frontend | 22 pages across 22 routes, AR-RTL + EN, single navy/gold theme (no light mode, no toggle), collapsible grouped sidebar with a gold active spine, dense tables that scroll inside their card, segmented view/status controls, every page wired to real endpoints, 76 component/interaction/token tests | `frontend/src/**/*.test.ts*`, `npm run build` |
 | RBAC gating in the UI | Every route wrapped in `RequirePermission`, settings tabs filtered by permission, dashboard/approvals/activity queries disabled without the read permission, `RestrictedPanel` instead of a 403, supplier balances withheld without `ledger:read` | `frontend/src/components/guard.test.tsx`, `frontend/src/pages/purchaseOrders.test.tsx`, `tests/test_frontend_permissions.py` (UI map ⊆ backend matrix) |
 | Design system enforcement | The palette, the single theme and every WCAG AA text pair are asserted against `tokens.css`, so a light-theme media query or a low-contrast tweak fails the build | `frontend/src/styles/tokens.test.ts` (5) |
-| Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub, `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (44/44 sockets connected under load) |
+| Live updates | `/ws` accepted **before** token validation so clients get real close codes (4401/4403), tenant-scoped hub with bounded per-socket queues (a socket 64 frames behind is dropped with code 1013; drops counted on `/metrics`), `type`-keyed frames, JSON or bare `ping` answered with `pong`, 25 s client heartbeat with capped backoff and tab-visibility reconnect | `tests/test_api_ws.py`, `scripts/load_test.py` (44/44 sockets connected under load) |
 | PostgreSQL verification | Migration chain `0001→0016` applied from scratch, `alembic check` (no drift), bootstrap + demo seed, 67 RLS policies, append-only refusals, `pg_trgm` indexes and pgvector columns all exercised on a real PostgreSQL 16.2 | `scripts/verify_rls.py` (29/29 PASS locally and in CI), CI job `postgres` |
 | Load (phase-4 measurement) | 50 concurrent role-based sessions (reads, requisitions, goods receipts and 44 live WebSockets): 39.5 req/s, p50 15 ms, p95 188 ms, p99 662 ms, 0 errors, 108/108 writes accepted; found and fixed a PII-decryption 500, a hot-loop in the harness and two hot-read N+1s | `scripts/load_test.py`, `docs/LOAD_TEST.md` |
 | Concurrency control | The read-modify-write aggregates are locked (`SELECT … FOR UPDATE`) before the check they protect: receipt quantity, invoice payment, journal posting, approval decision. Proven from the outside by firing the same request 5–8× at once | `scripts/concurrency_check.py` (PASS with locks, 400-of-100 received / 6 postings / 5 payments without them), `tests/test_services_receiving.py` (cumulative over-receipt), CI job `postgres` |
@@ -116,7 +120,6 @@ CI job `postgres`; the numbers below are labelled with the phase they were measu
 | Fully automated key rotation CLI | Needs a running secret manager | `app/core/crypto.py` records `key_id` so DEKs can be re-wrapped; procedure in `docs/SECURITY.md` |
 | Mobile app | Not in scope | The API is versioned and CORS-configured for a future client |
 | e-Invoicing / VAT submission | Country-specific compliance not in the SRS extract | Invoice model carries `lines`, `currency`, `status`; a submission adapter would slot in next to the payment adapter |
-| Distributed tracing (OTel) | `deploy/otel-collector.yaml` exists but the application does not emit spans or metrics yet; `OTEL_ENABLED` is reserved | Add `opentelemetry-instrumentation-fastapi` + an OTLP exporter in `app/main.py`; request ids and structured logs already carry the correlation id |
 
 ## Infrastructure verified in CI
 
@@ -136,12 +139,18 @@ the Celery workers are not executed here; their code paths run eagerly in the te
    behaviour gap.
 2. `app/agents/llm/providers.py` is now exercised over a real socket (success, retry, 4xx, transport
    failure) but still not against a vendor's live endpoint; a live smoke test needs `LLM_API_KEY`.
-3. The WebSocket hub has no back-pressure: a slow client is dropped after the first failed send.
-4. Arabic PDF rendering of purchase orders now embeds Noto Naskh Arabic and shapes it through
-   HarfBuzz, with the runs of a mixed line ordered right-to-left (`app/services/pdf_fonts.py`). What
-   is *not* proven here: this sandbox has no PDF rasteriser, so the page has never been rendered to
-   pixels — `tests/test_services_po_pdf.py` asserts the embedded face, the shaped drawing operators
-   and the run order, and a human opens the sample PDF in `docs/RUNBOOK.md` before a pilot mails one.
+3. The WebSocket hub now applies back-pressure: every socket drains a bounded per-connection queue
+   (64 frames) in its own writer task, and a socket that falls behind is disconnected with code 1013
+   so the browser reconnects and refetches — instead of stalling the room or pinning unbounded
+   memory. Drops are counted on `hub.slow_disconnects` and exposed on `/metrics` as
+   `procureai_ws_slow_disconnects_total`. Proven in `tests/test_ws_hub.py`.
+4. Arabic PDF rendering of purchase orders embeds Noto Naskh Arabic and shapes it through HarfBuzz,
+   with the runs of a mixed line ordered right-to-left (`app/services/pdf_fonts.py`). The layout was
+   rebuilt this phase (per-column run anchoring, a real meta block, thousands-separated amounts) after
+   a rasterised render showed the columns overlapping — and the page is now verified as an image:
+   PyMuPDF decompresses and rasterises the phase-6 PO (`/api/v1/purchase-orders/{id}/pdf`), the Arabic
+   lines read RTL, the Latin/numeric columns do not overlap, and the totals line is correct. The
+   manual cross-check in `docs/RUNBOOK.md` still applies before a pilot mails one.
 5. Frontend bundle: 400 kB (108 kB gzipped) for the app shell plus a 407 kB (110 kB gzipped) charts
    chunk. Vendor/tables/drag are split, but the analytics page itself is not yet lazily imported and
    the post-award screens ship in the main chunk.
@@ -152,9 +161,13 @@ the Celery workers are not executed here; their code paths run eagerly in the te
    later must not move the policy check out of code, which is why `voice_agent` returns
    `knowledge_version` and per-turn `block_code` — a regression there is visible in the data.
 8. The load test measures one uvicorn worker against one PostgreSQL instance. Cross-replica behaviour
-   is proven separately (`scripts/e2e_journeys.py` runs two API processes over one Redis), but no
-   load run has been executed against more than one replica: the rate limiter is still an in-process
-   counter, so N replicas multiply the effective per-user budget by N.
+   is proven separately (`scripts/e2e_journeys.py` runs two API processes over one Redis). The rate
+   limiter now has a shared backend: `RATE_LIMIT_BACKEND=redis` counts one sliding window across all
+   replicas (sorted set + atomic pipeline, rejected calls do not extend the window), proven by
+   `tests/test_rate_limit_redis.py` against an in-process Redis wire server and verified live on a
+   real Redis. If Redis is unreachable it falls back to per-process memory with a logged warning and
+   `procureai doctor` says so — availability first, loudly, never silently. No multi-replica *load*
+   run has been executed yet; that remains open.
 9. Concurrent goods receipts against **one** purchase order serialise on that order's row lock by
    design (that is what makes the cumulative over-receipt check safe). Eleven simultaneous receipts
    on the same order reach p95 ≈ 1.3 s while the aggregate p95 stays at 188 ms; a real warehouse
