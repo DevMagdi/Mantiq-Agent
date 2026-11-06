@@ -171,6 +171,10 @@ def build(name: str) -> Any:
             return S3Storage(bucket, getattr(settings, "aws_endpoint", ""),
                              getattr(settings, "aws_access_key", ""),
                              getattr(settings, "aws_secret_key", ""))
+        if settings.strict_providers:
+            from app.core.providers import storage_problem
+
+            raise ProviderNotConfigured(storage_problem(settings), problems=[storage_problem(settings)])
         return LocalStorage()
 
     raise KeyError(f"Unknown adapter: {name}")

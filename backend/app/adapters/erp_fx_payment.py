@@ -306,12 +306,24 @@ class LocalStorage:
     def exists(self, key: str) -> bool:
         return (self.root / key).exists()
 
+    def delete(self, key: str) -> None:
+        try:
+            (self.root / key).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def signed_url(self, key: str, expires_in: int = 300) -> str:
+        raise RuntimeError(
+            "Local storage has no signed URLs. Set AWS_STORAGE_BUCKET (S3-compatible object "
+            "storage) to issue expiring, single-purpose links to objects."
+        )
+
     def write_text(self, key: str, text: str) -> str:
         return self.put(key, text.encode())
 
 
 class S3Storage:
-    """S3-compatible (MinIO/AWS) storage via boto3 when installed."""
+    """S3-compatible (MinIO/AWS/R2/GCS) storage via boto3."""
 
     name = "s3"
 
@@ -321,26 +333,40 @@ class S3Storage:
         self.access_key = access_key
         self.secret_key = secret_key
 
-    def _client(self):  # pragma: no cover - optional dependency
-        import boto3  # type: ignore
+    def _client(self):
+        import boto3
+        from botocore.config import Config
 
+        # Path-style addressing: required by MinIO and most R2/GCS S3-compatible gateways, and
+        # harmless for AWS proper.
+        addressing = {"s3": {"addressing_style": "path"}} if self.endpoint else {}
         return boto3.client("s3", endpoint_url=self.endpoint or None,
                             aws_access_key_id=self.access_key or None,
-                            aws_secret_access_key=self.secret_key or None)
+                            aws_secret_access_key=self.secret_key or None,
+                            config=Config(**addressing))
 
-    def put(self, key: str, data: bytes) -> str:  # pragma: no cover
+    def put(self, key: str, data: bytes) -> str:
         self._client().put_object(Bucket=self.bucket, Key=key, Body=data)
         return key
 
-    def get(self, key: str) -> bytes:  # pragma: no cover
+    def get(self, key: str) -> bytes:
         return self._client().get_object(Bucket=self.bucket, Key=key)["Body"].read()
 
-    def exists(self, key: str) -> bool:  # pragma: no cover
+    def exists(self, key: str) -> bool:
         try:
             self._client().head_object(Bucket=self.bucket, Key=key)
             return True
         except Exception:
             return False
+
+    def delete(self, key: str) -> None:
+        self._client().delete_object(Bucket=self.bucket, Key=key)
+
+    def signed_url(self, key: str, expires_in: int = 300) -> str:
+        """A presigned GET URL — the only way a browser/supplier may fetch a private object."""
+        return self._client().generate_presigned_url(
+            "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=int(expires_in),
+        )
 
 
 def csv_bytes(rows: list[dict[str, Any]], columns: list[str] | None = None) -> bytes:

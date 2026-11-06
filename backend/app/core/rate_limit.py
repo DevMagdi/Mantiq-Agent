@@ -26,6 +26,15 @@ _BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 _MAX_KEYS = 50_000
 
 
+def backend_name() -> str:
+    """Which backend the limiter uses.
+
+    Until the shared limiter lands (Phase 3), buckets live in process memory and this says so —
+    ``procureai doctor`` must not claim a Redis backend that does not exist yet.
+    """
+    return "memory"
+
+
 def check(key: str, limit_per_minute: int | None = None) -> None:
     if not settings.rate_limit_enabled:
         return

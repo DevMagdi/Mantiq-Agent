@@ -24,6 +24,7 @@ dependencies = [
   # Arabic shaping for the PO PDF: reportlab shapes through HarfBuzz, which it only does when this
   # wheel is importable. Apache-2.0 (bundles HarfBuzz, Old-MIT).
   "uharfbuzz>=0.39",
+  "boto3>=1.34",
   "python-multipart>=0.0.9",
   "celery>=5.4,<6",
   "redis>=5,<6",
