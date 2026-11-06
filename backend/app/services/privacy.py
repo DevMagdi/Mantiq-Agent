@@ -19,7 +19,7 @@ report on-time completion.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -27,8 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit
 from app.db.models.entities import (
+    AuditLog,
     ChannelMessage,
     DataErasureRequest,
+    Notification,
+    RetentionPolicy,
     Supplier,
     SupplierContact,
     Tenant,
@@ -193,3 +196,42 @@ async def execute_erasure(session: AsyncSession, tenant: Tenant, request: DataEr
                 after={"subject_type": request.subject_type, "purged": purged})
     log.info("erasure executed request=%s purged=%s", request.id, purged)
     return purged
+
+
+async def purge_expired(session: AsyncSession, tenant: Tenant) -> dict[str, Any]:
+    """Honour retention windows and finish pending erasure requests.
+
+    This is the one entry the CLI and the Celery beat job call. Erasure goes
+    through ``execute_erasure`` above, so a purge and an API erasure redact the
+    same columns. Audit rows are counted, never deleted: the policy keeps them
+    as privileged records and the summary says how many have aged out.
+    """
+
+    policies = {row.entity: row.retain_days for row in (await session.execute(
+        select(RetentionPolicy).where(RetentionPolicy.tenant_id == tenant.id)
+    )).scalars().all()}
+    log_days = policies.get("logs", 365)
+    cutoff = datetime.now(UTC) - timedelta(days=log_days)
+    old_logs = list((await session.execute(
+        select(AuditLog).where(AuditLog.tenant_id == tenant.id, AuditLog.created_at < cutoff)
+    )).scalars().all())
+    old_notifications = list((await session.execute(
+        select(Notification).where(Notification.tenant_id == tenant.id, Notification.created_at < cutoff)
+    )).scalars().all())
+    for row in old_notifications:
+        await session.delete(row)
+    pending = list((await session.execute(
+        select(DataErasureRequest).where(
+            DataErasureRequest.tenant_id == tenant.id,
+            DataErasureRequest.status == "pending",
+        )
+    )).scalars().all())
+    for request in pending:
+        await execute_erasure(session, tenant, request)
+    await session.flush()
+    return {
+        "logs_eligible": len(old_logs),
+        "notifications_purged": len(old_notifications),
+        "erasure_records": len(pending),
+        "note": "Audit logs are retained per policy and archived, never silently dropped.",
+    }

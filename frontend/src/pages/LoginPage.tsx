@@ -1,21 +1,51 @@
 import { ArrowRight, CheckCircle2, ShieldCheck, Sparkles } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/session";
 import { Brand } from "@/components/Brand";
 import { Spinner } from "@/components/ui";
 
+const SSO_ERRORS: Record<string, string> = {
+  unknown_user: "auth.ssoUnknown",
+  mfa: "auth.ssoMfa",
+};
+
 export default function LoginPage() {
   const { t } = useTranslation();
   const { login, verifyMfa, status, challenge } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [slug, setSlug] = useState("");
+  const [ssoEnabled, setSsoEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const token = params.get("sso_error");
+    if (!token) return;
+    const key = SSO_ERRORS[token] ?? "auth.ssoError";
+    setError(t(key));
+  }, [params, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/auth/sso/config")
+      .then((response) => (response.ok ? response.json() : { enabled: false }))
+      .then((body: { enabled?: boolean }) => {
+        if (!cancelled) setSsoEnabled(Boolean(body.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setSsoEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (status === "authenticated") return <Navigate to="/" replace />;
 
@@ -172,6 +202,32 @@ export default function LoginPage() {
               </button>
             </form>
           )}
+          {ssoEnabled && !challenge ? (
+            <form
+              className="mt-4 space-y-3 border-t border-[color:var(--line)] pt-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const company = slug.trim().toLowerCase();
+                if (company) window.location.assign(`/api/v1/auth/sso/${encodeURIComponent(company)}/login`);
+              }}
+            >
+              <label className="label" htmlFor="company">
+                {t("auth.ssoSlug")}
+              </label>
+              <input
+                id="company"
+                className="input"
+                dir="ltr"
+                autoComplete="organization"
+                value={slug}
+                onChange={(event) => setSlug(event.target.value)}
+                required
+              />
+              <button className="btn-secondary w-full" type="submit">
+                {t("auth.sso")}
+              </button>
+            </form>
+          ) : null}
           <p className="mt-6 text-2xs leading-relaxed text-ink-subtle">{t("auth.demoHint")}</p>
         </div>
       </section>

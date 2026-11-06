@@ -125,6 +125,8 @@ or `response_format=json_object` (OpenAI) and validate the answer against the ta
 | `STT_PROVIDER` | `fake` \| `whisper` | Reuses `LLM_BASE_URL` / `LLM_API_KEY`, i.e. any Whisper-compatible endpoint. |
 | `ERP_PROVIDER` | `file` \| `odoo` | Accounting export. |
 | `PAYMENT_PROVIDER` + `STRIPE_KEY` | `fake` \| `stripe` \| `paymob` | Recording an intent only: **execution is deliberately outside the platform**. |
+| `EMBEDDING_PROVIDER` | `off` \| `openai_compatible` | Supplier similarity. Off keeps lexical / trigram search. `openai_compatible` calls `POST /embeddings` on `EMBEDDING_BASE_URL` (default `LLM_BASE_URL`, else `https://api.openai.com/v1`) with `EMBEDDING_MODEL` (default `text-embedding-3-small`) and `EMBEDDING_API_KEY` (falls back to `LLM_API_KEY`). `EMBEDDING_DIMENSIONS` (default `1536`) must match the model or the `embedding_vec` column is left empty and the JSON copy is still stored. A failed call never invents a vector: search stays lexical. |
+| `SSO_ENABLED` | `false` | OpenID Connect sign-in. Also needs `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`. Optional `OIDC_REDIRECT_URI` (default `{PUBLIC_APP_URL}/api/v1/auth/sso/callback`). A tenant opts out with `settings.sso.enabled = false`. SSO never creates a user. |
 
 ## 6. Behaviour switches
 
@@ -136,7 +138,7 @@ or `response_format=json_object` (OpenAI) and validate the answer against the ta
 | `RATE_LIMIT_ENABLED` | `true` | 240 req/min per user, 600 anonymous, login 10/account + 120/IP. |
 | `CONTACT_HOURS_START` / `CONTACT_HOURS_END` | `7` / `21` | Local hour window in which suppliers may be contacted. |
 | `DEMO_SEED_ON_START`, `BOOTSTRAP_ON_START` | `true` | Demo data and automatic migrations at boot. Set both to `false` in production and run `procureai bootstrap` explicitly. |
-| `OTEL_ENABLED` | `false` | Reserved: tracing instrumentation is not wired yet (see `docs/PROGRESS.md`). |
+| `OTEL_ENABLED` | `false` | When `true`, FastAPI and SQLAlchemy emit OTLP/HTTP spans (`procureai-api`). A dead collector logs and does not stop boot. |
 | `SENTRY_DSN` | empty | Backend error reporting, when set. |
 
 ## 7. Complete index — the remaining variables

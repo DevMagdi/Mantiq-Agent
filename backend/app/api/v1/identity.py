@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.core.rbac import ALL_PERMISSIONS, ROLE_PERMISSIONS, ROLES, permissions_
 from app.core.security import hash_password, password_policy_errors
 from app.db.models.entities import ApprovalLimit, Role, Tenant, User
 from app.services import auth as auth_service
+from app.services import oidc
 from app.services.common import notify
 
 router = APIRouter(tags=["identity"])
@@ -213,21 +215,69 @@ async def reset_confirm(payload: ResetConfirmIn, session: AsyncSession = Depends
     return result
 
 
-@router.get("/auth/sso/config", summary="SSO availability for the tenant (SAML / OIDC)")
+@router.get("/auth/sso/config", summary="Whether enterprise SSO (OIDC) is available")
 async def sso_config(session: AsyncSession = Depends(get_session_dep), tenant_slug: str | None = None):
-    query = select(Tenant).where(Tenant.kind == "customer")
-    if tenant_slug:
-        query = query.where(Tenant.slug == tenant_slug)
-    tenants = list((await session.execute(query)).scalars().all())
+    """Does not list every tenant. A slug is echoed only when that tenant may use SSO."""
+    enabled = oidc.deployment_ready()
     providers = []
-    for tenant in tenants:
-        sso = (tenant.settings or {}).get("sso", {})
-        if sso.get("enabled"):
-            providers.append({"tenant_slug": tenant.slug, "tenant_name": tenant.name,
-                              "provider": sso.get("provider", "saml"),
-                              "login_url": f"{settings.api_prefix}/auth/sso/{tenant.slug}/login"})
-    return {"providers": providers,
-            "note": "Configure SAML 2.0 or OIDC in Settings → Integrations to enable enterprise SSO."}
+    if enabled and tenant_slug:
+        tenant = (await session.execute(
+            select(Tenant).where(Tenant.slug == tenant_slug, Tenant.kind == "customer")
+        )).scalar_one_or_none()
+        if tenant is not None and oidc.tenant_allows(tenant):
+            providers.append({
+                "tenant_slug": tenant.slug,
+                "tenant_name": tenant.name,
+                "provider": "oidc",
+                "login_url": f"{settings.api_prefix}/auth/sso/{tenant.slug}/login",
+            })
+    return {
+        "enabled": enabled,
+        "providers": providers,
+        "note": "Company sign-in uses OpenID Connect. An administrator must create the user first; "
+                "SSO never provisions an account.",
+    }
+
+
+def _sso_failure(code: str) -> RedirectResponse:
+    target = f"{settings.public_app_url.rstrip('/')}/login?sso_error={code}"
+    return RedirectResponse(target, status_code=302)
+
+
+@router.get("/auth/sso/{tenant_slug}/login", summary="Start an OIDC sign-in for one tenant")
+async def sso_login(tenant_slug: str, request: Request, session: AsyncSession = Depends(get_session_dep)):
+    await rate_check(f"sso:{request.client.host if request.client else 'unknown'}", 20)
+    try:
+        url, cookie = await oidc.start(session, tenant_slug)
+    except oidc.SsoError as exc:
+        return _sso_failure(exc.code)
+    response = RedirectResponse(url, status_code=302)
+    response.set_cookie(
+        oidc.SSO_COOKIE, cookie, httponly=True, secure=settings.is_prod, samesite="lax",
+        max_age=600, path=f"{settings.api_prefix}/auth/sso",
+    )
+    return response
+
+
+@router.get("/auth/sso/callback", summary="OIDC redirect: exchange the code and open a session")
+async def sso_callback(request: Request, session: AsyncSession = Depends(get_session_dep),
+                       code: str = "", state: str = ""):
+    try:
+        result = await oidc.complete(
+            session, code=code, state=state, cookie=request.cookies.get(oidc.SSO_COOKIE, ""),
+            user_agent=request.headers.get("user-agent", ""),
+            ip=request.client.host if request.client else "",
+        )
+    except oidc.SsoError as exc:
+        await session.commit()
+        response = _sso_failure(exc.code)
+        response.delete_cookie(oidc.SSO_COOKIE, path=f"{settings.api_prefix}/auth/sso")
+        return response
+    await session.commit()
+    response = RedirectResponse(f"{settings.public_app_url.rstrip('/')}/", status_code=302)
+    _set_auth_cookies(response, result["refresh_token"])
+    response.delete_cookie(oidc.SSO_COOKIE, path=f"{settings.api_prefix}/auth/sso")
+    return response
 
 
 # ------------------------------------------------------------------ users & roles

@@ -93,6 +93,11 @@ const en: typeof ar = {
     mfaCode: "Verification code",
     mfaVerify: "Verify",
     demoHint: "Demo environment: use the seeded credentials documented in the runbook.",
+    sso: "Sign in with your company",
+    ssoSlug: "Company code",
+    ssoError: "Company sign-in failed. Use your password, or ask an administrator.",
+    ssoUnknown: "This account is not set up yet. An administrator has to create it before company sign-in works.",
+    ssoMfa: "This account uses an authenticator app. Sign in with your password, then the code.",
     highlights: [
       "An agent that negotiates inside an approved policy",
       "Total-cost-of-ownership offer comparison",

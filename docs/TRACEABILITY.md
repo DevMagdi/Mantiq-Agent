@@ -196,9 +196,6 @@ The phase-3 specification numbers its requirements by section (1.1–1.5, 2.1, 2
    that speak the vendors' wire formats — request shape, auth headers, retries, error mapping and
    parsing are exercised; the vendor's own endpoint is not. A live smoke test needs the credentials
    listed in `docs/ENVIRONMENT.md` plus outbound access to those hosts.
-2. Browser-level E2E is committed (`frontend/e2e`) and typechecked in CI but has not been executed
-   here: `npx playwright install chromium` fails because the Playwright CDN is unreachable. The same
-   journeys run without a browser in `scripts/e2e_journeys.py` and `tests/test_api_phase4_full_cycle.py`.
-3. pgvector *similarity ranking* is not implemented (the columns and HNSW indexes exist and are
-   verified on PostgreSQL 16, but no service computes embeddings yet); search falls back to the
-   trigram path.
+2. Browser end-to-end is `frontend/e2e` and runs in CI job `e2e` (28 specs). `npm run e2e:local` is the CDN-less runner.
+3. pgvector similarity ranking is implemented in `app/services/embeddings.py` when `EMBEDDING_PROVIDER=openai_compatible`. With the provider off, search stays on the trigram / ILIKE path and no vector is invented. The HNSW column is written only when the vector length matches `EMBEDDING_DIMENSIONS`.
+4. OIDC sign-in (`app/services/oidc.py`) is authorization-code + PKCE. It is off by default and never provisions a user. SAML is not implemented.

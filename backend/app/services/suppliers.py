@@ -128,6 +128,9 @@ async def create_supplier(session: AsyncSession, tenant: Tenant, *, name: str, n
     if email or phone:
         await upsert_contact(session, tenant, supplier, name="Primary contact", email=email, phone=phone,
                              language=language, whatsapp=bool(phone))
+    from app.services.embeddings import index_supplier
+
+    await index_supplier(session, supplier)
     return supplier
 
 
@@ -220,6 +223,21 @@ async def search_suppliers(session: AsyncSession, tenant_id: str, query: str = "
     if category:
         filters.append(cast(Supplier.categories, String).ilike(f"%{category}%"))
     total = (await session.execute(select(func.count()).select_from(Supplier).where(*filters))).scalar_one()
+    # Embeddings, when configured, re-rank the lexical hits. With the provider off this is the
+    # original score-ordered page, unchanged.
+    from app.services.embeddings import nearest, provider_configured, rerank
+
+    if query and provider_configured():
+        window = min(200, max(limit + offset, limit))
+        rows = list((await session.execute(
+            select(Supplier).where(*filters).order_by(Supplier.overall_score.desc(), Supplier.name.asc())
+            .limit(window)
+        )).scalars().all())
+        if not rows:
+            found = await nearest(session, tenant_id, query, limit=window)
+            return found[offset:offset + limit], len(found)
+        ranked = await rerank(query, rows)
+        return ranked[offset:offset + limit], int(total)
     rows = (await session.execute(
         select(Supplier).where(*filters).order_by(Supplier.overall_score.desc(), Supplier.name.asc())
         .limit(limit).offset(offset)

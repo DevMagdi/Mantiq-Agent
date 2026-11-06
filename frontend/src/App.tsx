@@ -1,5 +1,5 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { type ReactNode } from "react";
 import { Shell } from "./components/Shell";
 import { RequirePermission } from "./components/Guard";
 import { PERM } from "./lib/permissions";
@@ -11,12 +11,6 @@ import RfqBoardPage from "./pages/RfqBoardPage";
 import RfqDetailPage from "./pages/RfqDetailPage";
 import ApprovalsPage from "./pages/ApprovalsPage";
 import SuppliersPage from "./pages/SuppliersPage";
-import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
-import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
-import JournalPage from "./pages/JournalPage";
-import AccountingReportsPage from "./pages/AccountingReportsPage";
-import AccountingSetupPage from "./pages/AccountingSetupPage";
-import AnalyticsPage from "./pages/AnalyticsPage";
 import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
 import InboxPage from "./pages/InboxPage";
@@ -26,6 +20,29 @@ import AssistantPage from "./pages/AssistantPage";
 import PublicFormPage from "./pages/PublicFormPage";
 import PublicPortalPage from "./pages/PublicPortalPage";
 import NotFoundPage, { NotFoundContent } from "./pages/NotFoundPage";
+
+// Charts, the post-award screens and the ledger are not on the first paint. They load when the
+// route is opened so the shell stays small.
+const PurchaseOrdersPage = lazy(() => import("./pages/PurchaseOrdersPage"));
+const PurchaseOrderDetailPage = lazy(() => import("./pages/PurchaseOrderDetailPage"));
+const JournalPage = lazy(() => import("./pages/JournalPage"));
+const AccountingReportsPage = lazy(() => import("./pages/AccountingReportsPage"));
+const AccountingSetupPage = lazy(() => import("./pages/AccountingSetupPage"));
+const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
+
+function Lazy({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center gap-3 p-8 text-sm text-ink-muted">
+          <span className="size-4 animate-spin rounded-full border-2 border-line border-t-gold" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 
 /**
  * A screen that only exists when the deployment has the capability behind it.
@@ -99,12 +116,12 @@ export default function App() {
           } />
         <Route path="/purchase-orders" element={
             <RequirePermission permission={PERM.poRead}>
-              <PurchaseOrdersPage />
+              <Lazy><PurchaseOrdersPage /></Lazy>
             </RequirePermission>
           } />
         <Route path="/purchase-orders/:id" element={
             <RequirePermission permission={PERM.poRead}>
-              <PurchaseOrderDetailPage />
+              <Lazy><PurchaseOrderDetailPage /></Lazy>
             </RequirePermission>
           } />
         <Route path="/suppliers" element={
@@ -115,22 +132,22 @@ export default function App() {
         {/* Hidden with ACCOUNTING_ENABLED=false: a 404, exactly like an unknown URL. */}
         <Route path="/accounting" element={
             <CapabilityRoute permission={PERM.accountingRead}>
-              <JournalPage />
+              <Lazy><JournalPage /></Lazy>
             </CapabilityRoute>
           } />
         <Route path="/accounting/reports" element={
             <CapabilityRoute permission={PERM.costRead}>
-              <AccountingReportsPage />
+              <Lazy><AccountingReportsPage /></Lazy>
             </CapabilityRoute>
           } />
         <Route path="/accounting/setup" element={
             <CapabilityRoute permission={PERM.accountingRead}>
-              <AccountingSetupPage />
+              <Lazy><AccountingSetupPage /></Lazy>
             </CapabilityRoute>
           } />
         <Route path="/analytics" element={
             <RequirePermission permission={PERM.reportRead}>
-              <AnalyticsPage />
+              <Lazy><AnalyticsPage /></Lazy>
             </RequirePermission>
           } />
         <Route path="/activity" element={
